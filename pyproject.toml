@@ -9,10 +9,14 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "black>=25.1.0",
+    "joblib>=1.5.1",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.5",
     "numpy>=2.3.2",
     "polars>=1.32.2",
+    "pyarrow>=21.0.0",
+    "pytest[dev]>=8.4.1",
+    "scipy>=1.16.1",
     "seaborn>=0.13.2",
 ]
 
