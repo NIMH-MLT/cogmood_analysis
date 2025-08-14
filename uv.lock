@@ -285,6 +285,7 @@ dependencies = [
     { name = "polars" },
     { name = "pyarrow" },
     { name = "pytest", extra = ["dev"] },
+    { name = "pytest-datafiles" },
     { name = "scipy" },
     { name = "seaborn" },
 ]
@@ -299,6 +300,7 @@ requires-dist = [
     { name = "polars", specifier = ">=1.32.2" },
     { name = "pyarrow", specifier = ">=21.0.0" },
     { name = "pytest", extras = ["dev"], specifier = ">=8.4.1" },
+    { name = "pytest-datafiles", extras = ["dev"], specifier = ">=3.0.0" },
     { name = "scipy", specifier = ">=1.16.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
 ]
@@ -1515,6 +1517,18 @@ dev = [
     { name = "requests" },
     { name = "setuptools" },
     { name = "xmlschema" },
+]
+
+[[package]]
+name = "pytest-datafiles"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e7/1d/723fa4be3dec5384eb332888c1a22b4eeff848f9121efdded6859420902a/pytest-datafiles-3.0.0.tar.gz", hash = "sha256:a70c4c66a36d1cdcfc095607f04eee66eaef3fa64cbb62d60c47ce169901d1d4", size = 8357 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/d7/a29d8b79a8cf3125a4ed9af80cd93ef0374a8e8f6ea40268ed5cc2a6ce1d/pytest_datafiles-3.0.0-py2.py3-none-any.whl", hash = "sha256:2176e10d3f6e76f358925a897e21e2bcc5a0170b92fac4e66ed055eaa2ca6a22", size = 7416 },
 ]
 
 [[package]]

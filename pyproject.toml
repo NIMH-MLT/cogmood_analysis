@@ -15,11 +15,14 @@ dependencies = [
     "numpy>=2.3.2",
     "polars>=1.32.2",
     "pyarrow>=21.0.0",
-    "pytest[dev]>=8.4.1",
     "scipy>=1.16.1",
     "seaborn>=0.13.2",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.4.1",
+]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
