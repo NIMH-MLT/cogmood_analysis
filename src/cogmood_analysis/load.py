@@ -88,7 +88,7 @@ def boxcoxmask(x : ArrayLike, thresh : float = 3) -> NDArray[np.bool_]:
         goodxbc: NDArray[np.float64] = boxcox(x[ogxmask])[0]
         tmp[ogxmask] = np.abs((goodxbc - goodxbc.mean()) / goodxbc.std())
         newmask = ogxmask.copy()
-        while tmp[ogxmask].max() > thresh:
+        while tmp[newmask].max() > thresh:
             newmask = newmask & (tmp < thresh)
             goodxbc: NDArray[np.float64] = boxcox(x[newmask])[0]
             tmp = np.zeros_like(x) * np.nan
