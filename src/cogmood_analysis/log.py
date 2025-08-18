@@ -1,5 +1,5 @@
-#emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
-#ex: set sts=4 ts=4 sw=4 et:
+# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
+# ex: set sts=4 ts=4 sw=4 et:
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
 #
 #   See the COPYING file distributed along with the smile package for the
@@ -15,6 +15,7 @@ try:
     import cPickle as pickle
 except ImportError:
     import pickle
+
 
 class LogWriter(object):
     """An object that handles the writing of .slog files.
@@ -70,6 +71,7 @@ class LogReader(object):
     append_columns : dict
         Additional columns to add to each record.
     """
+
     def __init__(self, filename, unwrap=False, **append_columns):
         # set the file
         self._file = gzip.open(filename, "rb")
@@ -84,8 +86,7 @@ class LogReader(object):
         self._unpickler = pickle.Unpickler(self._file)
 
     def read_record(self):
-        """Returns a dicitionary with the field names as keys.
-        """
+        """Returns a dicitionary with the field names as keys."""
         try:
             # get the dict
             rec = self._unpickler.load()
@@ -113,7 +114,7 @@ class LogReader(object):
         self.close()
 
 
-def _unwrap(d, prefix=''):
+def _unwrap(d, prefix=""):
     """Process the items of a dict and unwrap them to the top level based
     on the key names.
 
@@ -121,11 +122,11 @@ def _unwrap(d, prefix=''):
     new_item = {}
     for k in d:
         # add prefix
-        key = prefix+k
+        key = prefix + k
 
         # see if dict
         if isinstance(d[k], dict):
-            new_item.update(_unwrap(d[k], prefix=key+'_'))
+            new_item.update(_unwrap(d[k], prefix=key + "_"))
             continue
 
         # see if tuple/list
@@ -134,7 +135,7 @@ def _unwrap(d, prefix=''):
             tdict = {}
             for j in range(len(d[k])):
                 tdict[str(j)] = d[k][j]
-            new_item.update(_unwrap(tdict, prefix=key+'_'))
+            new_item.update(_unwrap(tdict, prefix=key + "_"))
             continue
 
         # just add it in
@@ -152,8 +153,7 @@ def _root_to_files(log_filename):
         # try appending numbers
         log_files = []
         for distinguisher in range(256):
-            filename = "%s_%d.slog" % (log_filename,
-                                       distinguisher)
+            filename = "%s_%d.slog" % (log_filename, distinguisher)
             if os.path.exists(filename):
                 log_files.append(filename)
             else:
@@ -200,11 +200,8 @@ def log2dl(log_filename: str, unwrap=True, **append_columns) -> list[dict[str, a
     # loop over slogs pulling out dicts
     dl = []
     for i, slog in enumerate(log_files):
-        append_columns.update({'log_num': i})
-        dl.extend([r for r in
-                   LogReader(slog,
-                             unwrap=unwrap,
-                             **append_columns)])
+        append_columns.update({"log_num": i})
+        dl.extend([r for r in LogReader(slog, unwrap=unwrap, **append_columns)])
     return dl
 
 
@@ -236,7 +233,7 @@ def log2csv(log_filename, csv_filename=None, **append_columns):
     ..
         log2csv('log_study', subject='exp001')
 
-"""
+    """
     # determine set of slogs
     log_files = _root_to_files(log_filename)
     if len(log_files) == 0:
@@ -246,7 +243,7 @@ def log2csv(log_filename, csv_filename=None, **append_columns):
     colnames = []
     for i, slog in enumerate(log_files):
         # update the append_columns
-        append_columns.update({'log_num': i})
+        append_columns.update({"log_num": i})
         for record in LogReader(slog, unwrap=True, **append_columns):
             for fieldname in record:
                 if fieldname not in colnames:
@@ -254,10 +251,10 @@ def log2csv(log_filename, csv_filename=None, **append_columns):
 
     if csv_filename is None:
         # try making one out of the log_filename root
-        csv_filename = os.path.splitext(log_filename)[0] + '.csv'
+        csv_filename = os.path.splitext(log_filename)[0] + ".csv"
 
     # loop again and write out to file
-    with open(csv_filename, 'wb') as fout:
+    with open(csv_filename, "wb") as fout:
         # open CSV and write header
         dw = csv.DictWriter(fout, fieldnames=list(colnames))
         dw.writeheader()
@@ -265,15 +262,15 @@ def log2csv(log_filename, csv_filename=None, **append_columns):
         # loop over log entries
         for i, slog in enumerate(log_files):
             # update the append_columns
-            append_columns.update({'log_num': i})
+            append_columns.update({"log_num": i})
 
             # loop over all records
             for record in LogReader(slog, unwrap=True, **append_columns):
                 # handle unicode
-                record = dict((k, v.encode('utf-8')
-                               if isinstance(v, unicode)
-                               else v)
-                              for k, v in record.items())
+                record = dict(
+                    (k, v.encode("utf-8") if isinstance(v, unicode) else v)
+                    for k, v in record.items()
+                )
 
                 # write it out
                 dw.writerow(record)

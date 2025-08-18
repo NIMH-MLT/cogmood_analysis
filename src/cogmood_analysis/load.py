@@ -11,37 +11,39 @@ from numpy.typing import ArrayLike, NDArray
 from . import log
 
 
-def load_task(zipped_path: str | os.PathLike, task_name: str,  subject: str, runnum: int, as_dateframe: bool = False) -> pl.DataFrame:
-    zipped_path= Path(zipped_path)
+def load_task(
+    zipped_path: str | os.PathLike,
+    task_name: str,
+    subject: str,
+    runnum: int,
+    as_dateframe: bool = False,
+) -> pl.DataFrame:
+    zipped_path = Path(zipped_path)
     if not zipped_path.exists():
         raise FileNotFoundError(zipped_path)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        slog_file = ZipFile(zipped_path).extract(f'log_{task_name}_0.slog', path=tmpdir)
+        slog_file = ZipFile(zipped_path).extract(f"log_{task_name}_0.slog", path=tmpdir)
         lod = log.log2dl(slog_file)
         loddf = pl.from_dicts(lod)
     try:
-        loddf = loddf.filter(pl.col('run_num') == runnum)
+        loddf = loddf.filter(pl.col("run_num") == runnum)
     except pl.exceptions.ColumnNotFoundError:
-        loddf = loddf.filter(pl.col('block') == runnum)
+        loddf = loddf.filter(pl.col("block") == runnum)
     file_date = datetime.fromtimestamp(zipped_path.stat().st_mtime)
     loddf = loddf.with_columns(
-        sub_id=pl.lit(subject),
-        zrn=pl.lit(runnum),
-        date=pl.lit(file_date)
+        sub_id=pl.lit(subject), zrn=pl.lit(runnum), date=pl.lit(file_date)
     )
-    if task_name == 'cab':
-        loddf = loddf.with_columns(
-            rt=pl.col('resp_rt')
-        )
+    if task_name == "cab":
+        loddf = loddf.with_columns(rt=pl.col("resp_rt"))
     if as_dateframe:
         return loddf.to_pandas()
     else:
         return loddf
 
 
-def nanboxcox(x : ArrayLike) -> NDArray[np.float64]:
-    """ Run boxcox transformation with nan masking
+def nanboxcox(x: ArrayLike) -> NDArray[np.float64]:
+    """Run boxcox transformation with nan masking
     Parameters
     ----------
     x : ArrayLike
@@ -66,10 +68,10 @@ def nanboxcox(x : ArrayLike) -> NDArray[np.float64]:
     return res
 
 
-def boxcoxmask(x : ArrayLike, thresh : float = 3) -> NDArray[np.bool_]:
-    """ Iteratively run boxcox transformations and drop any values that 
+def boxcoxmask(x: ArrayLike, thresh: float = 3) -> NDArray[np.bool_]:
+    """Iteratively run boxcox transformations and drop any values that
     are more than thresh standard deviations away from the mean.
-    
+
     Parameters
     ----------
     x : ArrayLike
