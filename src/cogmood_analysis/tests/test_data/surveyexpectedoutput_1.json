@@ -1,0 +1,245 @@
+{
+  "race": [
+    "White"
+  ],
+  "ethnicity": "Not Hispanic or Latino",
+  "sex_at_birth": "Prefer not to answer",
+  "age": 20,
+  "ladder": null,
+  "ladder_resp": "5th rung",
+  "ongoing_mentalhealth": "Yes",
+  "mentalhealth_daily_impact": "No",
+  "experience_depression": "No",
+  "experience_anxiety": "No",
+  "have_adhd": "No",
+  "attn__1": "Yes",
+  "fried": "Bad things happening in their life.",
+  "mood_pro_diagnosis": "Yes",
+  "mood_diagnoses": [
+    "Bipolar II Disorder"
+  ],
+  "mood_first_dx_years": 20,
+  "mood_treatment": [
+    "Monoamine Oxidase Inhibitor (MAOI), such as: Emsam (selegiline), Marplan (isocarboxaxid)"
+  ],
+  "mood_med_today": "Yes",
+  "mood_bothered": "Yes",
+  "mood_bothered_today": "Yes",
+  "anxiety_pro_diagnosis": "Yes",
+  "anxiety_diagnoses": [
+    "Panic Attack"
+  ],
+  "anxiety_first_dx_years": 20,
+  "anxiety_treatment": [
+    "One-on-one talk therapy with a professional"
+  ],
+  "anxiety_med_today": "Not applicable (Not taking medication for an anxiety disorder)",
+  "anxiety_bothered": "Yes",
+  "anxiety_bothered_today": "Yes",
+  "attention_pro_diagnosis": "Yes",
+  "attention_diagnoses": [
+    "Attention-Deficit/Hyperactivity Disorder (ADHD)"
+  ],
+  "attention_first_dx_years": 20,
+  "attention_treatment": [
+    "Amphetamine, such as Dexedrine (dextroamphetamine), Adderall (amphetamine salts), Vyvanse (lisdexamfetamine)"
+  ],
+  "attention_med_today": "Yes",
+  "attention_bothered": "Yes",
+  "attention_bothered_today": "Yes",
+  "baaars_inattention": {
+    "baars_inattentive_1": 4,
+    "baars_inattentive_2": 1,
+    "baars_inattentive_3": 3,
+    "baars_inattentive_4": 4,
+    "baars_inattentive_5": 1,
+    "baars_inattentive_6": 3,
+    "attn__2": 4,
+    "baars_inattentive_7": 3,
+    "baars_inattentive_8": 2,
+    "baars_inattentive_9": 3
+  },
+  "baaars_hyperactivity": {
+    "baars_hyperactivity_1": 1,
+    "baars_hyperactivity_2": 4,
+    "baars_hyperactivity_3": 4,
+    "baars_hyperactivity_4": 3,
+    "baars_hyperactivity_5": 2
+  },
+  "baaars_impulsivity": {
+    "baars_impulsivity_1": 4,
+    "baars_impulsivity_2": 3,
+    "baars_impulsivity_3": 2,
+    "baars_impulsivity_4": 4
+  },
+  "baaars_sct": {
+    "baars_sct_1": 3,
+    "baars_sct_2": 3,
+    "baars_sct_3": 2,
+    "baars_sct_4": 2,
+    "baars_sct_5": 3,
+    "baars_sct_6": 3,
+    "baars_sct_7": 2,
+    "baars_sct_8": 3,
+    "baars_sct_9": 4
+  },
+  "gad7_": {
+    "gad7__1": 2,
+    "gad7__2": 0,
+    "gad7__3": 1,
+    "gad7__4": 2,
+    "gad7__5": 2,
+    "gad7__6": 3,
+    "gad7__7": 3
+  },
+  "phq8_": {
+    "phq8__1": 0,
+    "phq8__2": 1,
+    "phq8__3": 3,
+    "phq8__4": 1,
+    "phq8__5": 0,
+    "phq8__6": 0,
+    "phq8__7": 0,
+    "phq8__8": 2
+  },
+  "hitopintro1": null,
+  "hitopintro2": null,
+  "check_ack": ["Yes"],
+  "hitop_01": {
+    "hitop_anhdep_1": 2,
+    "hitop_sepinsec_1": 3,
+    "hitop_anxwor_1": 3,
+    "hitop_welbe_1": 0,
+    "hitop_appgn_1": 0,
+    "hitop_anhdep_2": 0
+  },
+  "hitop_02": {
+    "hitop_sepinsec_2": 2,
+    "hitop_anxwor_2": 1,
+    "hitop_sepinsec_3": 0,
+    "attn__3": 2,
+    "hitop_socanx_1": 0,
+    "hitop_anxwor_3": 0
+  },
+  "hitop_03": {
+    "hitop_socanx_2": 1,
+    "hitop_hypsom_1": 3,
+    "hitop_anhdep_3": 0,
+    "hitop_cogprb_1": 2,
+    "hitop_welbe_2": 3,
+    "hitop_welbe_3": 1
+  },
+  "hitop_04": {
+    "hitop_appgn_2": 1,
+    "hitop_sepinsec_4": 0,
+    "hitop_socanx_3": 1,
+    "hitop_indec_1": 0,
+    "hitop_socanx_4": 1,
+    "hitop_appls_1": 3
+  },
+  "hitop_05": {
+    "hitop_anhdep_4": 0,
+    "hitop_appgn_3": 0,
+    "hitop_anhdep_5": 2,
+    "hitop_anhdep_6": 0,
+    "hitop_socanx_5": 1,
+    "hitop_anhdep_7": 2
+  },
+  "hitop_06": {
+    "hitop_insom_1": 2,
+    "hitop_panic_1": 1,
+    "hitop_indec_2": 0,
+    "hitop_welbe_4": 0,
+    "hitop_appls_2": 3,
+    "hitop_sitphb_1": 0
+  },
+  "hitop_07": {
+    "hitop_anxwor_4": 2,
+    "hitop_cogprb_2": 1,
+    "hitop_socanx_6": 1,
+    "hitop_sepinsec_5": 2,
+    "hitop_anhdep_8": 0,
+    "hitop_anxwor_5": 1
+  },
+  "hitop_08": {
+    "hitop_panic_2": 3,
+    "attn__4": 3,
+    "hitop_socanx_7": 0,
+    "hitop_socanx_8": 3,
+    "hitop_welbe_5": 0,
+    "hitop_welbe_6": 3
+  },
+  "hitop_09": {
+    "hitop_insom_2": 1,
+    "hitop_welbe_7": 1,
+    "hitop_sitphb_2": 2,
+    "hitop_welbe_8": 1,
+    "hitop_welbe_9": 0,
+    "hitop_cogprb_3": 0
+  },
+  "hitop_10": {
+    "hitop_anhdep_9": 1,
+    "hitop_welbe_10": 1,
+    "hitop_sitphb_3": 3,
+    "hitop_hypsom_2": 2,
+    "hitop_hypsom_3": 2,
+    "hitop_anxwor_6": 1
+  },
+  "hitop_11": {
+    "hitop_socanx_9": 1,
+    "hitop_indec_3": 0,
+    "hitop_sepinsec_6": 1,
+    "hitop_sitphb_4": 0,
+    "hitop_anxwor_7": 0,
+    "hitop_cogprb_4": 0
+  },
+  "hitop_12": {
+    "hitop_anhdep_10": 2,
+    "hitop_appgn_4": 1,
+    "hitop_insom_3": 1,
+    "hitop_sitphb_5": 2,
+    "hitop_shmglt_1": 1,
+    "hitop_sepinsec_7": 3
+  },
+  "hitop_13": {
+    "hitop_hypsom_4": 0,
+    "hitop_panic_3": 0,
+    "hitop_socanx_10": 1,
+    "hitop_panic_4": 3,
+    "hitop_hypsom_5": 1,
+    "hitop_insom_4": 0
+  },
+  "hitop_14": {
+    "hitop_shmglt_2": 3,
+    "hitop_panic_5": 1,
+    "hitop_shmglt_3": 0,
+    "hitop_shmglt_4": 2,
+    "attn__5": 0,
+    "hitop_appls_3": 2
+  },
+  "hitop_15": {
+    "hitop_sepinsec_8": 1,
+    "hitop_panic_6": 0
+  },
+  "todayintro_1": null,
+  "today_1": [
+    "todaybaars_impulsivity_4"
+  ],
+  "today_2": [
+    "todayphq8__1"
+  ],
+  "today_3": [
+    "todayhitop_anxwor_3"
+  ],
+  "today_4": [
+    "todayhitop_welbe_5"
+  ],
+  "today_5": [
+    "today5__none"
+  ],
+  "handedness": "Left Handed",
+  "fatigue": "1: Not Tired",
+  "meal_type": "More",
+  "hunger": "1: Not Hungry",
+  "attn_fails": 0
+}
