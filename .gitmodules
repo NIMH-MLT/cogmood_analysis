@@ -1,0 +1,3 @@
+[submodule "packages/SupremePilot"]
+	path = packages/SupremePilot
+	url = https://github.com/cs-hall/SupremePilot.git
