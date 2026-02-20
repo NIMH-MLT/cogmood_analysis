@@ -39,6 +39,27 @@ def load_survey(
     return resp
 
 
+def unpack_results(jdat, simple_keys, nested_keys):
+    row = {}
+    for sk in simple_keys:
+        row[sk] = jdat[sk]
+    for nk in nested_keys:
+        nested_name = nk.split('_')[0]
+        for nkk in jdat[nk].keys():
+            row[f'{nested_name}__{nkk}'] = jdat[nk][nkk]
+    return row
+
+
+def load_flkr_results(filename):
+    """
+    Load in a simulation that was saved to a pickle.gz.
+    """
+    gf = gzip.open(filename, 'rb')
+    res = pickle.loads(gf.read(), encoding='latin1')
+    gf.close()
+    return res
+
+
 def proc_survey(responses: pl.DataFrame | list[dict[str, Any]]) -> pl.DataFrame:
     """Process list of survey responeses to score scales and subscales
     Parameters
