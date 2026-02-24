@@ -345,3 +345,92 @@ def boxcoxmask(x: ArrayLike, thresh: float = 3) -> NDArray[np.bool_]:
         return newmask
     except (IndexError, ValueError):
         return np.zeros_like(x, dtype=bool)
+
+
+def load_prolific_data(prolific_data_path: str | os.PathLike) -> pl.DataFrame:
+    pdf = pl.read_csv(prolific_data_path, separator='\t')
+    # grab good records for folks where there are some good rows and some bad
+    double_list = pdf.group_by('sub_id').agg(pl.col('age').n_unique()).sort('age').filter(pl.col('sub_id').is_not_null() & (pl.col('age') > 1))['sub_id'].to_list()
+    pdf = pdf.filter((~pl.col('sub_id').is_in(double_list)) | (pl.col('status') != 'RETURNED'))
+    pdf = (pdf
+        .filter(pl.col('status') != 'Status')
+        .filter(pl.col('sub_id').is_not_null())
+        .group_by('sub_id').last()
+        .with_columns(
+            pl.when(pl.col('depression') == "Yes").then(True).when(pl.col('depression') == "No").then(False).alias('p_depression'),
+            pl.when(pl.col('anxiety') == "Yes").then(True).when(pl.col('anxiety') == "No").then(False).alias('p_anxiety'),
+            pl.when(pl.col('attention') == "Yes").then(True).when(pl.col('attention') == "No").then(False).alias('p_attention'),
+            pl.when(pl.col('mental_health_ongoing') == "Yes").then(True).when(pl.col('mental_health_ongoing') == "No").then(False).alias('p_mental_health_ongoing'),
+            pl.when(pl.col('mental_illness_impact') == "Yes").then(True).when(pl.col('mental_illness_impact') == "No").then(False).alias('p_mental_illness_impact'),
+            pl.when(pl.col('age') == 'CONSENT_REVOKED').then(None).otherwise(pl.col('age')).str.to_integer().alias('p_age'),
+            pl.when(pl.col('language') == 'CONSENT_REVOKED').then(None).otherwise(pl.col('language')).alias('p_language'),
+            pl.when((pl.col('student_status') == 'CONSENT_REVOKED') | (pl.col('student_status') == 'DATA_EXPIRED')).then(None).otherwise(pl.col('student_status')).alias('p_student_status'),
+            pl.when((pl.col('employment_status') == 'CONSENT_REVOKED') | (pl.col('employment_status') == 'DATA_EXPIRED')).then(None).otherwise(pl.col('employment_status')).alias('p_employment_status'),
+            pl.when(pl.col('computer_os') == 'CONSENT_REVOKED').then(None).otherwise(pl.col('computer_os')).alias('p_computer_os'),
+            pl.col('total_approvals').str.to_integer().alias('p_total_approvals'),
+            pl.col('ses').str.to_integer().alias('p_ses'),
+            pl.col('highest_education').alias('p_highest_education')
+        )
+    )
+    # create columns for screening groups
+    pdf = pdf.with_columns(
+        prolific_screen_group=pl.when(
+            ~pl.col("p_mental_health_ongoing")
+            & ~pl.col("p_depression")
+            & ~pl.col("p_anxiety")
+            & ~pl.col("p_attention")
+        )
+        .then(pl.lit("hv"))
+        .when(
+            pl.col("p_mental_health_ongoing")
+            & ~pl.col("p_depression")
+            & ~pl.col("p_anxiety")
+            & ~pl.col("p_attention")
+        )
+        .then(pl.lit("othermh"))
+        .when(
+            pl.col("p_depression")
+            & ~pl.col("p_anxiety")
+            & ~pl.col("p_attention")
+        )
+        .then(pl.lit("dep"))
+        .when(
+            ~pl.col("p_depression")
+            & pl.col("p_anxiety")
+            & ~pl.col("p_attention")
+        )
+        .then(pl.lit("anx"))
+        .when(
+            ~pl.col("p_depression")
+            & ~pl.col("p_anxiety")
+            & pl.col("p_attention")
+        )
+        .then(pl.lit("atn"))
+        .when(
+            pl.col("p_depression")
+            & pl.col("p_anxiety")
+            & ~pl.col("p_attention")
+        )
+        .then(pl.lit("dep_anx"))
+        .when(
+            pl.col("p_depression")
+            & ~pl.col("p_anxiety")
+            & pl.col("p_attention")
+        )
+        .then(pl.lit("dep_atn"))
+        .when(
+            ~pl.col("p_depression")
+            & pl.col("p_anxiety")
+            & pl.col("p_attention")
+        )
+        .then(pl.lit("anx_atn"))
+        .when(
+            pl.col("p_depression")
+            & pl.col("p_anxiety")
+            & pl.col("p_attention")
+        )
+        .then(pl.lit("dep_anx_atn"))
+    )
+    # make sure that there's only one row of prolific data per subject id
+    assert pdf.group_by('sub_id').len()['len'].max() == 1
+    return pdf
