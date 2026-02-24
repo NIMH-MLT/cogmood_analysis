@@ -11,7 +11,8 @@ The flanker models are run from an apptainer container because they are based on
 1) Preprocess data with notebooks/exclusion_criteria.ipynb populating data/task/to_model
 2) Run FLKR model with notebooks/run_flkr_hpc.ipynb
 3) Run CAB, BART, and RDM models with notebooks/running_subs.ipynb
-4) Run correlations in notebooks/task_survey_correlations.ipynb
+4) Process the survey responses with notebooks/load_and_clean_survey.ipynb
+5) Run correlations in notebooks/task_survey_correlations.ipynb
 
 
 # Generative AI use
