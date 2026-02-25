@@ -720,6 +720,7 @@ SCALES = [
     ('hitop', None),
     ('baars', 'hyperactivity'),
     ('baars', 'impulsivity'),
+    ('baars', 'inattentive'),
     ('baars', 'sct'),
     ('hitop', 'anhdep'),
     ('hitop', 'sepinsec'),
