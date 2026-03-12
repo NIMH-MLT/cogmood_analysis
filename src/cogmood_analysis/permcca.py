@@ -98,13 +98,13 @@ def permcca(Y, X, nP=1000, Z=None, W=None, Sel=None, partial=True, Pset=None, re
             idxY = np.random.permutation(Ny) if p > 1 else np.arange(Ny)
             idxX = np.random.permutation(Nx) if p > 1 else np.arange(Nx)
         else:
-            idxY = Pset[:, p - 1]
+            idxY = Pset[:, p - 1] 
             idxX = np.arange(Nx)
 
         # For each canonical variable
         for k in range(K):
             _, _, rperm = seber_cca(Qz @ U[idxY, k:], Qw @ V[idxX, k:], R, S)
-            
+
             # why implement like this?
             lWtmp = -np.cumsum( np.log(1 - rperm ** 2)[::-1] )[::-1]
             lW[k] = lWtmp[0]
@@ -114,11 +114,10 @@ def permcca(Y, X, nP=1000, Z=None, W=None, Sel=None, partial=True, Pset=None, re
             lW1 = copy.deepcopy(lW)
 
         cnt += (lW - lW1 >= 0)*1.0
-
         _, _, rperm = seber_cca(Qz @ U[idxY], Qw @ V[idxX], R, S)
         rperm_list.append(rperm)
 
-        rperm_list_projected.append(lW)
+        rperm_list_projected.append(copy.deepcopy(lW))
 
     punc = cnt / nP
     pfwer = np.maximum.accumulate(punc)
@@ -139,6 +138,11 @@ def seber_cca(Y, X, R, S):
         L, D, MT = scipy.linalg.svd(QyTQx)
     else:
         L, D, MT = scipy.sparse.linalg.svds(QyTQx, k=K)
+    # svds does NOT sort singular values descending
+    idx = np.argsort(D)[::-1]
+    D = D[idx]
+    L = L[:, idx]
+    MT = MT[idx, :]
     
     cc = np.minimum(np.maximum(D[:K], 0), 1)
     A = np.linalg.pinv(Ry) @ (L[:, :K]) * np.sqrt(N - R)
