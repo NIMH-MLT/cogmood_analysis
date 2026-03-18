@@ -147,8 +147,8 @@ def seber_cca(Y, X, R, S):
     cc = np.minimum(np.maximum(D[:K], 0), 1)
     A = np.linalg.pinv(Ry) @ (L[:, :K]) * np.sqrt(N - R)
     B = np.linalg.pinv(Rx) @ (MT[:K, :].T) * np.sqrt(N - S)
-    A = A[iY]
-    B = B[iX]
+    A = A[np.argsort(iY)]
+    B = B[np.argsort(iX)]
     return A, B, cc
 
 def center(X):
