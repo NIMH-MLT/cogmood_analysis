@@ -734,5 +734,7 @@ SCALES = [
     ('hitop', 'appls'),
     ('hitop', 'insom'),
     ('hitop', 'shmglt'),
+    ('hitop', 'sitphb'),
+    ('hitop', 'panic'),
     ('attnbin', None),
 ]
