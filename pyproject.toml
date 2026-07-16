@@ -10,14 +10,23 @@ requires-python = ">=3.13"
 dependencies = [
     "arviz>=0.22.0",
     "black>=25.1.0",
+    "cca-zoo[deep]>=3.0.0",
     "joblib>=1.5.1",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.5",
     "numpy>=2.2.6",
     "polars>=1.32.2",
     "pyarrow>=21.0.0",
+    "safetensors>=0.8.0",
     "scipy>=1.15.3",
     "seaborn>=0.13.2",
+    "tabfm[pytorch]>=1.0.0",
+    "tabpfn>=2.2,<3",
+    # Pinned to a CUDA 12.6 build that still bundles Volta (sm_70) kernels so the
+    # Tesla V100s (CC 7.0, driver 575 / CUDA 12.9) are usable. torch 2.12 ships
+    # only as cu130 (needs driver >=580), and torch >=2.8 cu12x wheels dropped
+    # sm_70. See [tool.uv.sources].torch below.
+    "torch==2.7.1",
 ]
 
 [project.optional-dependencies]
@@ -31,3 +40,11 @@ build-backend = "hatchling.build"
 
 [tool.uv.workspace]
 members = ["packages/SupremePilot"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
