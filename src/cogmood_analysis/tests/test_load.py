@@ -44,7 +44,7 @@ def test_boxcoxmask():
     assert len(test_mask) == len(x)
 
 
-def test_load(datafiles):
+def test_load():
     zipped_path = Path(__file__).parent / "oneblock_test.zip"
     expected_flkr = pl.read_parquet(Path(__file__).parent / "test_data/flkr.parquet")
     expected_bart = pl.read_parquet(Path(__file__).parent / "test_data/bart.parquet")
