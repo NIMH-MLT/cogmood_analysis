@@ -108,11 +108,17 @@ class Views:
     n_total: int  # rows before complete-case filtering
 
 
+#: Tasks whose ``{task}__max_rhat`` columns gate model-fit convergence.
+RHAT_TASKS = ("bart", "rdm", "cab", "flkr")
+
+
 def load_views(
     csv_path: str | os.PathLike,
     a_columns: Sequence[str] | None = None,
     b_columns: Sequence[str] | None = None,
     strata_column: str = STRATA_COLUMN,
+    exclude_rhat_above: float | None = None,
+    rhat_tasks: Sequence[str] = RHAT_TASKS,
 ) -> Views:
     """Load and complete-case the two views from ``training_data.csv``.
 
@@ -127,6 +133,13 @@ def load_views(
     strata_column : column whose values stratify the train/test splits
         (default ``backfilled_prolific_screen_group``). Missing values are
         labelled ``"missing"`` so they form their own stratum.
+    exclude_rhat_above : if set (e.g. ``1.1``), drop subjects whose
+        ``{task}__max_rhat`` exceeds this threshold on *any* task in
+        ``rhat_tasks`` (model-fit convergence exclusion). ``None`` (default)
+        keeps every complete-case subject, matching the original behavioral-only
+        exclusion.
+    rhat_tasks : tasks whose ``max_rhat`` columns are checked when
+        ``exclude_rhat_above`` is set.
 
     Returns
     -------
@@ -147,6 +160,17 @@ def load_views(
         raise ValueError(f"Strata column {strata_column!r} not found in the CSV.")
 
     n_total = df.height
+
+    # optional model-fit convergence exclusion (any task max_rhat over threshold)
+    if exclude_rhat_above is not None:
+        rhat_cols = [f"{t}__max_rhat" for t in rhat_tasks if f"{t}__max_rhat" in available]
+        if not rhat_cols:
+            raise ValueError("exclude_rhat_above set but no {task}__max_rhat columns found.")
+        keep = pl.all_horizontal(
+            [pl.col(c) <= exclude_rhat_above for c in rhat_cols]
+        )
+        df = df.filter(keep)
+
     # cast the analysis columns to float, then complete-case on both views
     sub = df.select(["sub_id", strata_column, *a_cols, *b_cols]).with_columns(
         [pl.col(c).cast(pl.Float64, strict=False) for c in (*a_cols, *b_cols)]

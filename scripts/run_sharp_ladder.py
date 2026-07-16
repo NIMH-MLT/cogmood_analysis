@@ -32,6 +32,16 @@ OUT = REPO / "data" / "exploratory" / "sharp_ladder_results.pkl"
 
 def main() -> None:
     quick = os.environ.get("SV_QUICK") == "1"
+    # SV_MAX_RHAT (e.g. "1.1") excludes subjects with any-task max_rhat above it
+    # (model-fit convergence exclusion) and writes to a separate results file so
+    # the unfiltered results are preserved for comparison.
+    max_rhat_env = os.environ.get("SV_MAX_RHAT")
+    exclude_rhat = float(max_rhat_env) if max_rhat_env else None
+    out = OUT
+    if exclude_rhat is not None:
+        tag = f"rhat{str(exclude_rhat).replace('.', 'p')}"
+        out = REPO / "data" / "exploratory" / f"sharp_ladder_results_{tag}.pkl"
+
     arms = list(sharp.LADDER)
     gpu_ids = sp.detect_gpus()
 
@@ -57,9 +67,11 @@ def main() -> None:
 
     perm_arms = arms
 
-    views = sv.load_views(CSV)
-    print(f"{'QUICK' if quick else 'FULL'} run | N={views.A.shape[0]} "
-          f"| GPUs={gpu_ids} | J={J} K={K} | arms={arms}", flush=True)
+    views = sv.load_views(CSV, exclude_rhat_above=exclude_rhat)
+    rhat_msg = f"exclude max_rhat>{exclude_rhat}" if exclude_rhat is not None else "no rhat exclusion"
+    print(f"{'QUICK' if quick else 'FULL'} run | N={views.A.shape[0]} of {views.n_total} "
+          f"({rhat_msg}) | GPUs={gpu_ids} | J={J} K={K} | arms={arms}", flush=True)
+    print(f"results -> {out}", flush=True)
 
     t0 = time.time()
     res = sp.sharp_eval_parallel(
@@ -83,10 +95,10 @@ def main() -> None:
     }
 
     def checkpoint():
-        OUT.write_bytes(pickle.dumps(results))
+        out.write_bytes(pickle.dumps(results))
 
     checkpoint()  # save the (expensive) main eval + CIs + comparisons immediately
-    print(f"[checkpoint] main eval saved -> {OUT}", flush=True)
+    print(f"[checkpoint] main eval saved -> {out}", flush=True)
 
     for a in perm_arms:
         t = time.time()
@@ -100,7 +112,7 @@ def main() -> None:
               f"p={results['perms'][a]['p']:.4f} ({time.time() - t:.0f}s) [checkpointed]",
               flush=True)
 
-    print(f"\nSaved results -> {OUT}  (total {time.time() - t0:.0f}s)", flush=True)
+    print(f"\nSaved results -> {out}  (total {time.time() - t0:.0f}s)", flush=True)
 
     # console summary
     perms = results["perms"]

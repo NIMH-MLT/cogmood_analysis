@@ -67,6 +67,24 @@ def test_load_views_complete_case_and_alignment():
     assert views.B.shape[1] == len(views.b_columns)
 
 
+@pytest.mark.skipif(not TRAINING_CSV.exists(), reason="training_data.csv not present")
+def test_load_views_rhat_exclusion():
+    full = sv.load_views(TRAINING_CSV)
+    filt = sv.load_views(TRAINING_CSV, exclude_rhat_above=1.1)
+    # exclusion drops a strict, non-empty subset
+    assert 0 < filt.A.shape[0] < full.A.shape[0]
+    # kept subjects are exactly those with all-task max_rhat <= 1.1
+    import polars as pl
+    df = pl.read_csv(TRAINING_CSV, infer_schema_length=20000)
+    ok = df.filter(
+        pl.all_horizontal([pl.col(f"{t}__max_rhat") <= 1.1
+                           for t in ("bart", "rdm", "cab", "flkr")])
+    )["sub_id"].to_list()
+    assert set(filt.sub_ids.tolist()) == set(ok)
+    # views stay aligned after filtering
+    assert filt.A.shape[0] == filt.B.shape[0] == filt.strata.shape[0]
+
+
 # --- pure-numpy helpers -----------------------------------------------------
 
 
