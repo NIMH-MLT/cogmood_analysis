@@ -280,3 +280,132 @@ def run_ak(
         if m.sum():
             q[m] = _bh_fdr(tbl.filter(pl.Series(m))["p"].to_numpy())
     return tbl.with_columns(pl.Series("fdr_q", q))
+
+
+# --- Westfall-Young max-statistic FWER correction ---------------------------
+
+
+def maxstat_correction(
+    absz: NDArray, targets: Sequence["Target"], topk: Sequence[int] = (3, 5),
+    n_perm: int = 10000, seed: int = 0,
+) -> tuple[pl.DataFrame, NDArray]:
+    """Westfall-Young **step-down** maxT FWER correction across the unsupervised family.
+
+    The family is every (unsupervised approach × target) pair. A **single shared
+    permutation of the subject order** is drawn per iteration and applied to the
+    whole symptom matrix at once (features fixed), so the joint dependence of the
+    correlated tests is preserved.
+
+    Step-down (Westfall & Young 1993): order the observed statistics
+    ``t_(1) >= ... >= t_(m)``. For each permutation, form the successive maxima
+    ``q_(k) = max`` of the permutation statistics over ranks ``k..m`` (i.e. the
+    hypothesis at rank k competes only against itself and the less-significant
+    ones). The raw adjusted p at rank k is the fraction of permutations with
+    ``q_(k) >= t_(k)``; monotonicity is then enforced across ranks. This is
+    uniformly more powerful than single-step maxT (which always uses the
+    full-family max) while still controlling FWER under subset pivotality. The
+    two coincide for the most significant test.
+
+    The test is **one-sided** (positive): the features are non-negative measures of
+    cognitive abnormality (max|z|, top-k mean|z|, count |z|>2, distance) and AK
+    predicts more abnormality → more symptoms; a negative association is not a
+    meaningful alternative here.
+
+    Spearman is computed as Pearson on standardized ranks, so each permutation is
+    a couple of small matrix products (fast; ``n_perm`` can be large). Subjects
+    non-finite on any unsupervised feature (essentially none) are dropped so the
+    shared permutation aligns exactly.
+
+    Returns a per-(approach, target, variant) table with observed ``effect`` and
+    ``adj_p_maxT``, plus the rank-1 full-family max-null vector (for reference).
+    """
+    feats = deviation_features(absz, topk=topk)
+    fnames = list(feats)
+    F = np.column_stack([feats[k] for k in fnames])          # (n, n_feat)
+    Y = np.column_stack([t.y for t in targets])              # (n, n_targ)
+    ok = np.isfinite(F).all(1) & np.isfinite(Y).all(1)
+    F, Y = F[ok], Y[ok]
+    n = F.shape[0]
+
+    def std_ranks(M: NDArray) -> NDArray[np.float64]:
+        R = np.apply_along_axis(stats.rankdata, 0, M).astype(float)
+        return (R - R.mean(0)) / R.std(0)
+
+    RF, RY = std_ranks(F), std_ranks(Y)                      # standardized ranks
+    S_obs = (RF.T @ RY) / n                                  # (n_feat, n_targ) Spearman r
+    n_feat, n_targ = S_obs.shape
+    obs = S_obs.ravel()
+    order = np.argsort(obs)[::-1]                            # observed, most->least significant
+    obs_sorted = obs[order]
+
+    rng = np.random.default_rng(seed)
+    counts = np.zeros(obs.size)                              # exceedances per rank
+    maxnull = np.empty(n_perm)                               # rank-1 (full-family) max, reference
+    for b in range(n_perm):
+        Sp = ((RF.T @ RY[rng.permutation(n)]) / n).ravel()[order]
+        # successive maxima over ranks k..m (reverse cumulative max)
+        q = np.maximum.accumulate(Sp[::-1])[::-1]
+        counts += q >= obs_sorted
+        maxnull[b] = q[0]
+    p_raw = (counts + 1) / (n_perm + 1)
+    p_adj_sorted = np.maximum.accumulate(p_raw)              # enforce monotone non-decreasing
+    p_adj = np.empty_like(p_adj_sorted)
+    p_adj[order] = p_adj_sorted
+    P = p_adj.reshape(n_feat, n_targ)
+
+    rows = []
+    for i, fn in enumerate(fnames):
+        for j, t in enumerate(targets):
+            rows.append({"approach": fn, "target": t.name, "variant": t.variant,
+                         "effect": float(S_obs[i, j]), "adj_p_maxT": float(P[i, j]),
+                         "primary": bool(t.primary)})
+    return pl.DataFrame(rows).sort("adj_p_maxT"), maxnull
+
+
+def maxstat_within_approach(
+    absz: NDArray, targets: Sequence["Target"], topk: Sequence[int] = (3, 5),
+    n_perm: int = 10000, seed: int = 0,
+) -> pl.DataFrame:
+    """Step-down maxT FWER correction computed SEPARATELY within each approach.
+
+    Same one-sided step-down Westfall-Young procedure as :func:`maxstat_correction`,
+    but the family is a single approach's targets (not the joint approach×target
+    grid). Reported as ``within_maxT``. This controls FWER *within* each approach
+    (across its symptom targets) but NOT jointly across the 5 approaches - use it
+    when the approaches are treated as separate analyses rather than one family.
+    Permutations are shared across targets within each approach (same seed across
+    approaches for comparability).
+    """
+    feats = deviation_features(absz, topk=topk)
+    fnames = list(feats)
+    F = np.column_stack([feats[k] for k in fnames])
+    Y = np.column_stack([t.y for t in targets])
+    ok = np.isfinite(F).all(1) & np.isfinite(Y).all(1)
+    F, Y = F[ok], Y[ok]
+    n = F.shape[0]
+
+    def std_ranks(M: NDArray) -> NDArray[np.float64]:
+        R = np.apply_along_axis(stats.rankdata, 0, M).astype(float)
+        return (R - R.mean(0)) / R.std(0)
+
+    RF, RY = std_ranks(F), std_ranks(Y)
+    rows = []
+    for i, fn in enumerate(fnames):
+        rf = RF[:, i]
+        obs = (rf @ RY) / n                       # (n_targ,) Spearman r for this approach
+        order = np.argsort(obs)[::-1]
+        obs_sorted = obs[order]
+        rng = np.random.default_rng(seed)         # same perms across approaches
+        counts = np.zeros(obs.size)
+        for _ in range(n_perm):
+            sp = ((rf @ RY[rng.permutation(n)]) / n)[order]
+            q = np.maximum.accumulate(sp[::-1])[::-1]
+            counts += q >= obs_sorted
+        p_adj_sorted = np.maximum.accumulate((counts + 1) / (n_perm + 1))
+        p_adj = np.empty_like(p_adj_sorted)
+        p_adj[order] = p_adj_sorted
+        for j, t in enumerate(targets):
+            rows.append({"approach": fn, "target": t.name, "variant": t.variant,
+                         "effect": float(obs[j]), "within_maxT": float(p_adj[j]),
+                         "primary": bool(t.primary)})
+    return pl.DataFrame(rows).sort(["approach", "within_maxT"])

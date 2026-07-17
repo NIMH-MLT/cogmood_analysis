@@ -1,6 +1,7 @@
 """Tests for the Anna Karenina deviation-based test module."""
 
 import numpy as np
+import polars as pl
 import pytest
 
 from cogmood_analysis import anna_karenina as ak
@@ -74,3 +75,49 @@ def test_ak_supervised_recovers_signal_and_null_calibrated():
     rng = np.random.default_rng(5)
     res0 = ak.ak_supervised(Xi, rng.permutation(y), n_repeats=2, n_perm=60, seed=0)
     assert res0["effect"] < 0.02
+
+
+# --- maxT (Westfall-Young step-down) correction -----------------------------
+
+
+def _targets(Y, names):
+    return [ak.Target(name=n, variant="resid", y=Y[:, i], primary=(n == "PC1"))
+            for i, n in enumerate(names)]
+
+
+def test_maxstat_stepdown_recovers_monotone_and_one_sided():
+    rng = np.random.default_rng(0)
+    n, P = 500, 10
+    absz = np.abs(rng.normal(size=(n, P)))
+    burden = absz.max(1)
+    Y = np.column_stack([
+        burden + rng.normal(scale=1.0, size=n),   # sig: positively assoc with max|z|
+        -burden + rng.normal(scale=1.0, size=n),  # neg: one-sided test should miss it
+        rng.normal(size=n), rng.normal(size=n),    # noise
+    ])
+    tgts = _targets(Y, ["sig", "neg", "noise1", "noise2"])
+    tbl, maxnull = ak.maxstat_correction(absz, tgts, n_perm=1000, seed=0)
+    assert tbl["adj_p_maxT"].min() >= 0 and tbl["adj_p_maxT"].max() <= 1
+    # the planted (max_abs, sig) cell is the strongest and significant
+    sig = tbl.filter((pl.col("approach") == "max_abs") & (pl.col("target") == "sig"))
+    assert sig["adj_p_maxT"][0] < 0.05
+    # one-sided: a strong NEGATIVE association is not significant
+    neg = tbl.filter((pl.col("approach") == "max_abs") & (pl.col("target") == "neg"))
+    assert neg["adj_p_maxT"][0] > 0.5
+    # step-down monotonicity: adj_p non-decreasing as observed effect decreases
+    s = tbl.sort("effect", descending=True)["adj_p_maxT"].to_numpy()
+    assert np.all(np.diff(s) >= -1e-9)
+
+
+def test_within_approach_le_joint():
+    rng = np.random.default_rng(1)
+    absz = np.abs(rng.normal(size=(400, 8)))
+    burden = absz.max(1)
+    Y = np.column_stack([burden + rng.normal(size=400)] + [rng.normal(size=400) for _ in range(5)])
+    tgts = _targets(Y, ["sig"] + [f"n{i}" for i in range(5)])
+    joint, _ = ak.maxstat_correction(absz, tgts, n_perm=1000, seed=0)
+    within = ak.maxstat_within_approach(absz, tgts, n_perm=1000, seed=0)
+    j = joint.rename({"adj_p_maxT": "joint"}).join(
+        within.select(["approach", "target", "within_maxT"]), on=["approach", "target"])
+    # smaller family -> within-approach adjusted p <= joint adjusted p
+    assert (j["within_maxT"] <= j["joint"] + 1e-9).all()
