@@ -50,6 +50,11 @@ from . import shared_variance as sv
 SUMMARY_TOTALS = ("phq8", "gad7", "baars", "hitop")
 INDICATOR_Z = 2.0
 
+#: Positively-valenced scales (higher = healthier). Sign-flipped so every symptom
+#: target is oriented "higher = more pathology", matching the other scales and the
+#: one-sided AK direction (more cognitive abnormality -> more symptoms).
+REVERSE_SCORED = ("hitop_welbe",)
+
 
 # --- loading + alignment ----------------------------------------------------
 
@@ -116,7 +121,12 @@ def symptom_targets(data: AKData) -> list[Target]:
     (oriented so higher = more symptoms). Residualized PC1 is the primary.
     """
     targets: list[Target] = []
-    S = data.symptoms
+    S = data.symptoms.copy()
+    # reverse-score positively-valenced scales so higher = more pathology, before
+    # forming individual targets and the PC1 general factor
+    for c in REVERSE_SCORED:
+        if c in data.symptom_cols:
+            S[:, data.symptom_cols.index(c)] *= -1.0
     Sz = (S - S.mean(0)) / S.std(0)
     pc = PCA(n_components=1, random_state=0).fit(Sz)
     pc1 = pc.transform(Sz).ravel()

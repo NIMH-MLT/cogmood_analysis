@@ -77,6 +77,25 @@ def test_ak_supervised_recovers_signal_and_null_calibrated():
     assert res0["effect"] < 0.02
 
 
+# --- reverse-scored (positive-valence) targets ------------------------------
+
+
+def test_reverse_scored_welbe_is_flipped():
+    rng = np.random.default_rng(0)
+    n = 200
+    cols = ["phq8", "hitop_welbe"]
+    S = rng.normal(size=(n, 2))
+    data = ak.AKData(
+        sub_ids=np.array([str(i) for i in range(n)]), params=["a"],
+        absz=np.abs(rng.normal(size=(n, 1))), symptom_cols=cols, symptoms=S,
+        age=rng.uniform(18, 80, n), sex=rng.integers(0, 2, n).astype(float),
+        is_hv=np.zeros(n, bool))
+    tg = {(t.name, t.variant): t for t in ak.symptom_targets(data)}
+    # positive-valence scale flipped (higher = more pathology); others unchanged
+    assert np.allclose(tg[("hitop_welbe", "raw")].y, -S[:, 1])
+    assert np.allclose(tg[("phq8", "raw")].y, S[:, 0])
+
+
 # --- maxT (Westfall-Young step-down) correction -----------------------------
 
 
