@@ -27,6 +27,7 @@ dependencies = [
     # only as cu130 (needs driver >=580), and torch >=2.8 cu12x wheels dropped
     # sm_70. See [tool.uv.sources].torch below.
     "torch==2.7.1",
+    "xgboost>=3.3.0",
 ]
 
 [project.optional-dependencies]
