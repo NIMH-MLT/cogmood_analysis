@@ -137,6 +137,35 @@ cells.append(nbf.v4.new_code_cell(
 ))
 
 cells.append(nbf.v4.new_markdown_cell(
+    "## 4. Feature view: the 4 per-task summary scores (SHARP)\n\n"
+    "The 30 fitted parameters are a high-dimensional, noisy view of task behavior. As a "
+    "lower-dimensional alternative we repeat the SHARP full-vs-null test with the full model's "
+    "cognitive features set to the **4 per-task summary scores** (`{task}__sub_score`) instead "
+    "of the 30 parameters — everything else identical (same N=1298, same age+sex null, same "
+    "one-sided SHARP). If a coarse behavioral summary carried symptom signal that the parameters "
+    "diluted, it would show here."
+))
+
+cells.append(nbf.v4.new_code_cell(
+    "ss = pl.read_parquet(\"../data/exploratory/xgb_subscores_sharp_results.parquet\")\n"
+    "sstbl = (ss.select(['target', 'mean_r2_gain', 'ci_lo', 'ci_hi', 'p_one_sided', 'q_fdr'])\n"
+    "           .with_columns([pl.col(c).round(4) for c in\n"
+    "                          ['mean_r2_gain', 'ci_lo', 'ci_hi', 'p_one_sided', 'q_fdr']]))\n"
+    "print(sstbl)\n"
+    "n_sig = int((ss['q_fdr'] < 0.05).sum())\n"
+    "n_pos = int((ss['mean_r2_gain'] > 0).sum())\n"
+    "print(f\"\\nPositive mean R2 gain: {n_pos}/{ss.height} | surviving BH-FDR (q<0.05): {n_sig}/{ss.height}\")"
+))
+
+cells.append(nbf.v4.new_markdown_cell(
+    "Same null. 19/20 targets negative, only `hitop_welbe` a hair positive (+0.0002, p≈0.48); "
+    "no target survives FDR. Fewer, cleaner features make the gaps slightly less negative and the "
+    "SHARP CIs tighter, but nothing crosses into a real positive gain. The result is robust across "
+    "feature representations (30 parameters vs 4 summary scores) as well as evaluation schemes "
+    "(SHARP split-half vs full-sample K-fold)."
+))
+
+cells.append(nbf.v4.new_markdown_cell(
     "## Conclusion\n\n"
     "**Decisive null.** For every one of the 20 survey scores the held-out R² gain from "
     "adding the 30 cognitive parameters is **negative** — the full model predicts *worse* "
@@ -152,7 +181,9 @@ cells.append(nbf.v4.new_markdown_cell(
     "predictive information about symptom scores beyond demographics.\n\n"
     "The full-sample K-fold cross-check (§3) confirms this is not an artifact of SHARP's "
     "split-half: doubling the per-fold training data only shrinks the negative gaps toward zero "
-    "and nudges three targets a hair positive, none distinguishable from noise.\n\n"
+    "and nudges three targets a hair positive, none distinguishable from noise. Swapping the 30 "
+    "parameters for the 4 per-task summary scores (§4) gives the same null. The result therefore "
+    "holds across feature representations and evaluation schemes.\n\n"
     "_Training half only; the held-out half remains untouched for any future confirmatory step._"
 ))
 
