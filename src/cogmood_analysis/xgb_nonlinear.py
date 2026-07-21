@@ -289,3 +289,103 @@ def run_xgb_nonlinear(
     tbl = pl.DataFrame(rows)
     q = _bh_fdr(tbl["p_one_sided"].to_numpy())
     return tbl.with_columns(pl.Series("q_fdr", q)).sort("p_one_sided")
+
+
+# --- full-sample K-fold cross-check (no SHARP split-half) --------------------
+
+
+def kfold_r2_gain(
+    covars: NDArray[np.float64],
+    params: NDArray[np.float64],
+    y: NDArray[np.float64],
+    strata: NDArray[np.str_],
+    K: int = 5,
+    n_reps: int = 20,
+    seed: int = 0,
+    n_jobs: int = 1,
+) -> dict[str, float]:
+    """Full-sample repeated stratified K-fold: held-out ``R2_full - R2_null``.
+
+    A robustness check for :func:`sharp_xgb`, which trains each model on only a
+    disjoint half (~415 rows here). This uses the **whole training-half sample**
+    for K-fold CV, so each model trains on ~(K-1)/K of it (~830 rows) - roughly
+    double the data - to see whether more data surfaces any positive gain. Still
+    training half only; the held-out half is never touched. No split-half means the
+    SHARP variance estimator does not apply, so this reports only descriptive
+    statistics of the fold-level R^2 differences, not a p-value.
+
+    Returns the mean held-out R^2 gain and its spread across the ``n_reps * K``
+    folds, the fraction of folds with a positive gain, the single best fold gain,
+    and the mean held-out R^2 of each arm.
+    """
+    X_null = covars
+    X_full = np.column_stack([covars, params])
+
+    def _one_rep(rep: int) -> tuple[list[float], list[float], list[float]]:
+        skf = StratifiedKFold(n_splits=K, shuffle=True, random_state=seed + rep)
+        gains, r2_full, r2_null = [], [], []
+        for tr, te in skf.split(X_null, strata):
+            a = _fit_r2(X_null[tr], y[tr], X_null[te], y[te], seed=seed + rep)
+            b = _fit_r2(X_full[tr], y[tr], X_full[te], y[te], seed=seed + rep)
+            r2_null.append(a)
+            r2_full.append(b)
+            gains.append(b - a)
+        return gains, r2_full, r2_null
+
+    if n_jobs != 1:
+        from joblib import Parallel, delayed
+
+        reps = Parallel(n_jobs=n_jobs)(delayed(_one_rep)(r) for r in range(n_reps))
+    else:
+        reps = [_one_rep(r) for r in range(n_reps)]
+
+    gains = np.array([g for rep in reps for g in rep[0]], dtype=float)
+    r2_full = np.array([v for rep in reps for v in rep[1]], dtype=float)
+    r2_null = np.array([v for rep in reps for v in rep[2]], dtype=float)
+    return {
+        "mean_r2_gain": float(gains.mean()),
+        "sd_r2_gain": float(gains.std(ddof=1)),
+        "ci_lo": float(np.percentile(gains, 2.5)),
+        "ci_hi": float(np.percentile(gains, 97.5)),
+        "frac_folds_positive": float((gains > 0).mean()),
+        "max_fold_gain": float(gains.max()),
+        "mean_r2_full": float(r2_full.mean()),
+        "mean_r2_null": float(r2_null.mean()),
+        "n_folds": int(gains.size),
+    }
+
+
+def run_xgb_kfold(
+    data: XGBData,
+    targets: Sequence[str] | None = None,
+    K: int = 5,
+    n_reps: int = 20,
+    seed: int = 0,
+    n_jobs: int = 1,
+    verbose: bool = True,
+) -> pl.DataFrame:
+    """Full-sample repeated K-fold R^2 comparison for every survey score.
+
+    Companion to :func:`run_xgb_nonlinear`: same full-vs-null XGBoost contrast but
+    trained on the whole training-half sample per fold (no SHARP split-half), to
+    check whether the extra training data yields any positive R^2 gain. Returns a
+    tidy table sorted by ``mean_r2_gain`` (descending).
+    """
+    target_cols = list(targets) if targets is not None else list(data.symptom_cols)
+    rows: list[dict[str, float | str]] = []
+    for name in target_cols:
+        y = data.symptoms[:, data.symptom_cols.index(name)]
+        res = kfold_r2_gain(
+            data.covars, data.params, y, data.strata,
+            K=K, n_reps=n_reps, seed=seed, n_jobs=n_jobs,
+        )
+        rows.append({"target": name, "n": int(data.covars.shape[0]), **res})
+        if verbose:
+            print(
+                f"{name:22s}  R2 gain={res['mean_r2_gain']:+.4f} "
+                f"[{res['ci_lo']:+.4f},{res['ci_hi']:+.4f}]  "
+                f"folds+={res['frac_folds_positive']:.2f}  "
+                f"max={res['max_fold_gain']:+.4f}"
+            )
+
+    return pl.DataFrame(rows).sort("mean_r2_gain", descending=True)

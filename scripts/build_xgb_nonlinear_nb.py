@@ -85,6 +85,58 @@ cells.append(nbf.v4.new_code_cell(
 ))
 
 cells.append(nbf.v4.new_markdown_cell(
+    "## 3. Cross-check: full-sample K-fold (no SHARP split-half)\n\n"
+    "SHARP splits each repetition into two disjoint halves, so each model trains on only "
+    "~415 rows here — a concern given the modest N. As a robustness check we repeat the same "
+    "full-vs-null XGBoost contrast with **repeated stratified K-fold on the whole training-half "
+    "sample** (each model trains on ~830 rows, roughly double), and simply compare the held-out "
+    "R² directly. No split-half means the SHARP variance estimator does not apply, so this is "
+    "purely descriptive — the question is whether more training data surfaces any *positive* "
+    "R² gain. (Still training half only; the held-out half is never read.)"
+))
+
+cells.append(nbf.v4.new_code_cell(
+    "kf = pl.read_parquet(\"../data/exploratory/xgb_kfold_results.parquet\")\n"
+    "kftbl = (kf.select(['target', 'mean_r2_gain', 'ci_lo', 'ci_hi',\n"
+    "                    'frac_folds_positive', 'max_fold_gain', 'mean_r2_full', 'mean_r2_null'])\n"
+    "           .with_columns([pl.col(c).round(4) for c in\n"
+    "                          ['mean_r2_gain', 'ci_lo', 'ci_hi', 'frac_folds_positive',\n"
+    "                           'max_fold_gain', 'mean_r2_full', 'mean_r2_null']]))\n"
+    "print(kftbl)\n"
+    "n_pos = int((kf['mean_r2_gain'] > 0).sum())\n"
+    "print(f\"\\nTargets with a positive mean R2 gain: {n_pos} / {kf.height}\")\n"
+    "print(f\"Largest mean R2 gain: {kf['mean_r2_gain'].max():+.4f} \"\n"
+    "      f\"({kf.sort('mean_r2_gain', descending=True)['target'][0]})\")"
+))
+
+cells.append(nbf.v4.new_markdown_cell(
+    "The gaps shrink toward zero relative to the split-half test (the extra features needed more "
+    "data to stop hurting), and a few targets tip marginally positive — but the fold-level 95% "
+    "bands all straddle zero, the fractions of positive folds sit near a coin-flip, and the "
+    "full-model absolute R² for the 'positive' targets is ~0. More data does not surface a real "
+    "nonlinear cognition→symptom signal."
+))
+
+cells.append(nbf.v4.new_code_cell(
+    "d = kf.sort('mean_r2_gain')\n"
+    "targets = d['target'].to_list()\n"
+    "gain = d['mean_r2_gain'].to_numpy()\n"
+    "lo, hi = d['ci_lo'].to_numpy(), d['ci_hi'].to_numpy()\n"
+    "y = np.arange(len(targets))\n"
+    "colors = np.where(gain > 0, 'seagreen', '0.4')\n\n"
+    "fig, ax = plt.subplots(figsize=(7, 7))\n"
+    "ax.axvline(0, color='k', lw=0.8, zorder=0)\n"
+    "for i in range(len(targets)):\n"
+    "    ax.plot([lo[i], hi[i]], [y[i], y[i]], color=colors[i], lw=1.5, alpha=0.6)\n"
+    "ax.scatter(gain, y, c=colors, s=40, zorder=5)\n"
+    "ax.set_yticks(y); ax.set_yticklabels(targets)\n"
+    "ax.set_xlabel('held-out R² gain (full − null), full-sample K-fold; bars = 2.5–97.5% of folds')\n"
+    "ax.set_title('Full-sample K-fold cross-check (no split-half)')\n"
+    "plt.tight_layout()\n"
+    "plt.show()"
+))
+
+cells.append(nbf.v4.new_markdown_cell(
     "## Conclusion\n\n"
     "**Decisive null.** For every one of the 20 survey scores the held-out R² gain from "
     "adding the 30 cognitive parameters is **negative** — the full model predicts *worse* "
@@ -98,6 +150,9 @@ cells.append(nbf.v4.new_markdown_cell(
     "interactions among the parameters — finds no nonlinear cognition→symptom relationship "
     "either. Within this training half, cognitive task parameters carry no recoverable "
     "predictive information about symptom scores beyond demographics.\n\n"
+    "The full-sample K-fold cross-check (§3) confirms this is not an artifact of SHARP's "
+    "split-half: doubling the per-fold training data only shrinks the negative gaps toward zero "
+    "and nudges three targets a hair positive, none distinguishable from noise.\n\n"
     "_Training half only; the held-out half remains untouched for any future confirmatory step._"
 ))
 
