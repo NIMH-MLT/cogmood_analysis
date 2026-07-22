@@ -24,6 +24,7 @@ import numpy as np
 from cogmood_analysis import shared_variance as sv
 from cogmood_analysis import sharp
 from cogmood_analysis import sharp_parallel as sp
+from cogmood_analysis import provenance as prov
 
 REPO = Path(__file__).resolve().parents[1]
 CSV = REPO / "data" / "exploratory" / "training_data.csv"
@@ -86,13 +87,22 @@ def main() -> None:
         for a1, a2 in itertools.combinations(arms, 2)
     }
 
+    provenance = prov.provenance(
+        CSV, views.sub_ids,
+        config={"analysis": "sharp_cca_ladder", "quick": quick, "arms": arms,
+                "J": J, "K": K, "J_perm": J_perm, "K_perm": K_perm, "n_perm": n_perm,
+                "exclude_rhat_above": exclude_rhat, "seed": 0,
+                "inference": "score_test", "signed_correlations": True},
+    )
     results = {
         "quick": quick, "arms": arms, "J": J, "K": K, "J_perm": J_perm,
         "K_perm": K_perm, "n_perm": n_perm, "n_subjects": int(views.A.shape[0]),
         "a_columns": views.a_columns, "b_columns": views.b_columns,
         "D_A": res.D_A, "D_B": res.D_B, "cis": cis, "comparisons": comparisons,
-        "perms": {}, "perms_done": [],
+        "perms": {}, "perms_done": [], "provenance": provenance,
     }
+    print(f"[provenance] commit={provenance['source_commit'][:9] if provenance['source_commit'] else '?'}"
+          f" dirty={provenance['dirty']} subjset={provenance['subject_set_sha256'][:12]}", flush=True)
 
     def checkpoint():
         out.write_bytes(pickle.dumps(results))

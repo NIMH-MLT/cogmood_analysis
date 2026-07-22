@@ -242,9 +242,19 @@ def embed_view_fm(
     train_data_source : ``data_source`` passed when embedding the TRAIN rows.
         ``"test"`` (default) embeds train rows in the same query regime as the
         held-out rows so the two embedding distributions match - this transfers
-        markedly better than ``"train"``. This affects only the train
-        embeddings (which fit the CCA); test embeddings always use ``"test"``
-        against the train-only context, so there is no leakage.
+        markedly better than ``"train"``.
+
+        CAVEAT (support/query asymmetry): the in-context reference is the fitted
+        ``X_train`` (with its within-view pseudo-target). TRAIN rows are therefore
+        queried against a context that *contains labeled copies of themselves*,
+        whereas TEST rows are absent from their context. This can leak the
+        within-view pseudo-target into the train representations and optimistically
+        bias the CCA fit for the FM arms. It is a within-view effect only (the
+        pseudo-target carries no cross-view information), and because the FM arms
+        do not beat the linear ``raw`` baseline the direction is conservative for
+        the study's conclusion. A leakage-free fix would require per-row
+        leave-one-out contexts (not supported by the TabPFN embedding API) and is
+        not implemented; the caveat is reported instead.
     device : ``"auto"`` (use CUDA if available, else CPU), ``"cpu"`` or
         ``"cuda"``.
     ignore_pretraining_limits : pass through to ``TabPFNRegressor``. Required to
