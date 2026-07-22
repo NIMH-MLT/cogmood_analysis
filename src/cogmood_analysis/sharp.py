@@ -32,12 +32,19 @@ remain correlated. That structure identifies both the per-statistic variance
     D_bar      = (mean(D_A) + mean(D_B)) / 2
     Var(D_bar) = sigma^2 * (1/(2J) + (J-1)/J * rho)
 
-from which valid CIs and a valid model-comparison test follow. We estimate
-``sigma^2`` from the within-pair differences (independent, so
-``E[(D_Aj - D_Bj)^2] = 2 sigma^2``) and ``rho`` from the centred variance of the
-pair means (``E[Var(s_j)] = sigma^2 (1/2 - rho)``); both are mean-free, so the
-Wald and score tests coincide (the paper offers method-of-moments as one
-estimator option, Supplementary S7.3).
+from which valid CIs and a valid model-comparison test follow.
+
+Inference is the paper's **score test** (its recommended choice, Supplementary
+S7.6/S7.8): the ``2J`` half-statistics are jointly Gaussian with mean ``mu``,
+variance ``sigma^2`` and common correlation ``rho`` on every off-diagonal pair
+*except* the paired ``(D_Aj, D_Bj)`` (independent halves). To test ``H0: mu = mu0``
+we estimate ``sigma^2`` and ``rho`` by maximizing that Gaussian likelihood with
+the mean fixed at ``mu0`` (null-constrained MLE, ``_null_constrained_mle``), then
+``Z = (D_bar - mu0) / sqrt(Var(D_bar; sigma0^2, rho0))``. Confidence intervals are
+built by **test inversion** (the set of ``mu0`` with ``p >= alpha``,
+``_invert_score_test``), matching the paper. The earlier method-of-moments + Wald
+path (``_sharp_moments``) is retained only as a reference for the calibration test
+- it inflates the false-positive rate and must not be used for reported inference.
 
 Because comparisons must be paired, :func:`sharp_eval` runs *all* arms on the
 *same* folds, so any pair of arms can be compared via the per-half difference of
@@ -51,7 +58,7 @@ from typing import Any, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import stats
+from scipy import optimize, stats
 from sklearn.model_selection import StratifiedKFold
 
 from . import shared_variance as sv
@@ -729,17 +736,29 @@ def _eval_one_rep(
     return out[0], out[1]
 
 
-# --- SHARP estimator (method of moments) ------------------------------------
+# --- SHARP inference: paper's null-constrained score test -------------------
+#
+# Model (Zeng et al. 2026, main text + Supplementary S7): the 2J half-statistics
+# d = [D_A1..D_AJ, D_B1..D_BJ] are jointly Gaussian, mean mu, variance sigma^2, and
+# common correlation rho on every off-diagonal pair EXCEPT the paired (D_Aj, D_Bj)
+# which are independent. The structured correlation matrix R has eigenvalues
+#   lambda1 = 1 + 2 rho (J-1)   (x1, the all-ones direction),
+#   lambda2 = 1 - 2 rho         (x(J-1), symmetric, orthogonal to 1),
+#   lambda3 = 1                 (xJ, antisymmetric),
+# so R is positive-definite iff rho in (-1/(2(J-1)), 1/2) -- note rho CAN be
+# negative. Var(D_bar) = sigma^2 lambda1 / (2J) = sigma^2 (1/(2J) + (J-1)/J rho).
 
 
 def _sharp_moments(
     D_A: NDArray[np.float64], D_B: NDArray[np.float64]
 ) -> tuple[float, float, float, float]:
-    """Return (D_bar, var_Dbar, sigma2, rho) for paired half-statistics.
+    """Method-of-moments estimate (paper S7.3) -- REFERENCE ONLY.
 
-    ``sigma^2`` from within-pair differences (the halves are independent, so
-    ``E[(D_Aj - D_Bj)^2] = 2 sigma^2``); ``rho`` from the centred variance of the
-    pair means (``E[Var(s_j)] = sigma^2 (1/2 - rho)``). Both are mean-free.
+    Retained so the calibration test can demonstrate its false-positive
+    inflation; reported inference uses :func:`sharp_score_test`. ``sigma^2`` from
+    within-pair differences (``E[(D_Aj-D_Bj)^2]=2 sigma^2``); ``rho`` from the
+    centred variance of the pair means; both mean-free, ``rho`` clipped to
+    ``[0, .499]`` (part of why it miscalibrates).
     """
     mask = ~(np.isnan(D_A) | np.isnan(D_B))
     a, b = D_A[mask], D_B[mask]
@@ -751,54 +770,158 @@ def _sharp_moments(
     s = 0.5 * (a + b)
     V_s = float(np.var(s, ddof=1))
     rho = 0.5 - (V_s / sigma2 if sigma2 > 1e-12 else 0.0)
-    rho = float(np.clip(rho, 0.0, 0.499))  # fold correlations are non-negative
+    rho = float(np.clip(rho, 0.0, 0.499))
     var_Dbar = sigma2 * (1.0 / (2 * J) + (J - 1) / J * rho)
     return float(D_bar), float(max(var_Dbar, 0.0)), sigma2, rho
+
+
+def _quadratic_form(a: NDArray, b: NDArray, mu0: float, rho: float, J: int) -> float:
+    """r^T R(rho)^-1 r for r = [a-mu0, b-mu0], via the eigendecomposition of R."""
+    rA, rB = a - mu0, b - mu0
+    u = (rA + rB) / np.sqrt(2.0)          # symmetric coords
+    v = (rA - rB) / np.sqrt(2.0)          # antisymmetric coords (lambda3 = 1)
+    Su2, Sv2 = float(u @ u), float(v @ v)
+    s0sq = (u.sum() ** 2) / J             # energy on the all-ones direction
+    lam1 = 1.0 + 2.0 * rho * (J - 1)
+    lam2 = 1.0 - 2.0 * rho
+    return s0sq / lam1 + (Su2 - s0sq) / lam2 + Sv2
+
+
+def _null_constrained_mle(a: NDArray, b: NDArray, mu0: float) -> tuple[float, float]:
+    """MLE of (sigma^2, rho) with the mean fixed at ``mu0`` (Gaussian likelihood).
+
+    Concentrates sigma^2 = qform/(2J) and profiles the 1-D objective
+    ``2J log(qform(rho)) + log|R(rho)|`` over the PD interval for rho.
+    """
+    J = a.size
+    lo, hi = -1.0 / (2.0 * (J - 1)) + 1e-9, 0.5 - 1e-9
+
+    def neg2ll(rho: float) -> float:
+        q = _quadratic_form(a, b, mu0, rho, J)
+        logdetR = np.log(1.0 + 2.0 * rho * (J - 1)) + (J - 1) * np.log(1.0 - 2.0 * rho)
+        return 2 * J * np.log(max(q, 1e-300)) + logdetR
+
+    res = optimize.minimize_scalar(neg2ll, bounds=(lo, hi), method="bounded")
+    rho0 = float(res.x)
+    sigma2_0 = _quadratic_form(a, b, mu0, rho0, J) / (2 * J)
+    return sigma2_0, rho0
+
+
+def sharp_score_test(
+    D_A: NDArray[np.float64],
+    D_B: NDArray[np.float64],
+    mu0: float = 0.0,
+    alternative: str = "two-sided",
+) -> dict[str, float]:
+    """Paper-faithful SHARP score test of ``H0: mu = mu0``.
+
+    ``alternative`` is ``"two-sided"``, ``"greater"`` (mu > mu0) or ``"less"``.
+    Returns ``D_bar``, the score ``z``, ``p``, and the null-constrained
+    ``sigma2``/``rho`` and ``var_Dbar``.
+    """
+    mask = ~(np.isnan(D_A) | np.isnan(D_B))
+    a, b = np.asarray(D_A, float)[mask], np.asarray(D_B, float)[mask]
+    J = a.size
+    D_bar = 0.5 * (a.mean() + b.mean()) if J else float("nan")
+    if J < 2:
+        return {"D_bar": D_bar, "z": float("nan"), "p": float("nan"),
+                "sigma2": float("nan"), "rho": float("nan"),
+                "var_Dbar": float("nan"), "J": int(J)}
+    sigma2_0, rho0 = _null_constrained_mle(a, b, mu0)
+    var_Dbar = sigma2_0 * (1.0 / (2 * J) + (J - 1) / J * rho0)
+    se = float(np.sqrt(max(var_Dbar, 0.0)))
+    z = (D_bar - mu0) / se if se > 1e-12 else 0.0
+    if alternative == "greater":
+        p = float(1 - stats.norm.cdf(z))
+    elif alternative == "less":
+        p = float(stats.norm.cdf(z))
+    else:
+        p = float(2 * (1 - stats.norm.cdf(abs(z))))
+    return {"D_bar": float(D_bar), "z": float(z), "p": p, "sigma2": float(sigma2_0),
+            "rho": float(rho0), "var_Dbar": float(var_Dbar), "J": int(J)}
+
+
+def _invert_score_test(
+    a: NDArray, b: NDArray, alpha: float = 0.05
+) -> tuple[float, float]:
+    """Test-inversion CI: the set of ``mu0`` with two-sided ``p >= alpha``."""
+    D_bar = 0.5 * (a.mean() + b.mean())
+
+    def p_of(mu0: float) -> float:
+        return sharp_score_test(a, b, mu0=mu0, alternative="two-sided")["p"]
+
+    def bound(direction: int) -> float:
+        # expand a step outward until the test rejects, then bisect the boundary
+        step = max(abs(D_bar), 1e-3)
+        far = D_bar
+        for _ in range(60):
+            far = far + direction * step
+            if p_of(far) < alpha:
+                break
+            step *= 2.0
+        else:
+            return far  # never rejected within range
+        near = far - direction * step  # last non-rejecting point (p >= alpha)
+        for _ in range(80):
+            mid = 0.5 * (near + far)
+            if p_of(mid) >= alpha:
+                near = mid
+            else:
+                far = mid
+        return near
+
+    return bound(-1), bound(+1)
 
 
 def sharp_ci(
     res: SharpResult, arm: str, alpha: float = 0.05
 ) -> dict[str, float]:
-    """Valid SHARP confidence interval for one arm's held-out canonical r."""
-    D_bar, var_Dbar, sigma2, rho = _sharp_moments(res.D_A[arm], res.D_B[arm])
-    se = float(np.sqrt(var_Dbar))
-    z = float(stats.norm.ppf(1 - alpha / 2))
+    """SHARP confidence interval for one arm via score-test inversion."""
+    mask = ~(np.isnan(res.D_A[arm]) | np.isnan(res.D_B[arm]))
+    a, b = res.D_A[arm][mask], res.D_B[arm][mask]
+    st = sharp_score_test(a, b, mu0=0.0)
+    if a.size < 2:
+        lo = hi = float("nan")
+    else:
+        lo, hi = _invert_score_test(a, b, alpha=alpha)
+    D_bar = st["D_bar"]
     return {
         "mean": D_bar,
-        "se": se,
-        "lo": D_bar - z * se,
-        "hi": D_bar + z * se,
+        "lo": lo,
+        "hi": hi,
         "shared_variance": D_bar ** 2,
-        "sigma2": sigma2,
-        "rho": rho,
-        "J": int((~(np.isnan(res.D_A[arm]) | np.isnan(res.D_B[arm]))).sum()),
+        "sigma2": st["sigma2"],
+        "rho": st["rho"],
+        "z": st["z"],
+        "p": st["p"],
+        "J": int(a.size),
     }
 
 
 def sharp_compare(
-    res: SharpResult, arm1: str, arm2: str
+    res: SharpResult, arm1: str, arm2: str, alpha: float = 0.05
 ) -> dict[str, float]:
-    """Valid SHARP test that arm1 and arm2 differ in held-out canonical r.
+    """SHARP score test that arm1 and arm2 differ in held-out canonical r.
 
     Uses the paired per-half differences (same folds), so the comparison is
-    fold-dependence-aware. Two-sided p-value from the Wald/score Z = D_bar / SE
-    (the mean-free MoM estimates make the two coincide).
+    fold-dependence-aware, with a test-inversion CI on the difference.
     """
     dA = res.D_A[arm1] - res.D_A[arm2]
     dB = res.D_B[arm1] - res.D_B[arm2]
-    D_bar, var_Dbar, sigma2, rho = _sharp_moments(dA, dB)
-    se = float(np.sqrt(var_Dbar))
-    z = D_bar / se if se > 1e-12 else 0.0
-    p = float(2 * (1 - stats.norm.cdf(abs(z))))
+    st = sharp_score_test(dA, dB, mu0=0.0, alternative="two-sided")
+    mask = ~(np.isnan(dA) | np.isnan(dB))
+    lo, hi = (_invert_score_test(dA[mask], dB[mask], alpha=alpha)
+              if mask.sum() >= 2 else (float("nan"), float("nan")))
     return {
         "arm1": arm1,
         "arm2": arm2,
-        "diff": D_bar,
-        "se": se,
-        "z": float(z),
-        "p": p,
-        "sigma2": sigma2,
-        "rho": rho,
+        "diff": st["D_bar"],
+        "z": st["z"],
+        "p": st["p"],
+        "lo": lo,
+        "hi": hi,
+        "sigma2": st["sigma2"],
+        "rho": st["rho"],
     }
 
 

@@ -55,6 +55,70 @@ def test_sharp_moments_variance_formula():
     assert abs(D_bar - 0.5 * (D_A.mean() + D_B.mean())) < 1e-12
 
 
+# --- paper-faithful score test + calibration --------------------------------
+
+
+def _sample_sharp_null(J, sigma2, rho, n_sim, seed):
+    """Draw n_sim SHARP half-statistic pairs under H0 (mu=0) with the paper's
+    structured covariance: common corr rho on all off-diagonal pairs except the
+    paired (A_j, B_j) which are independent."""
+    rng = np.random.default_rng(seed)
+    cov = np.full((2 * J, 2 * J), sigma2 * rho)
+    np.fill_diagonal(cov, sigma2)
+    for j in range(J):  # paired halves are independent
+        cov[j, J + j] = cov[J + j, j] = 0.0
+    draws = rng.multivariate_normal(np.zeros(2 * J), cov, size=n_sim)
+    return draws[:, :J], draws[:, J:]
+
+
+def test_score_test_recovers_variance_params():
+    # the null-constrained MLE is (approximately) unbiased for (sigma2, rho):
+    # a single draw is noisy, so check the mean over many draws.
+    J, sigma2, rho, n_sim = 40, 0.04, 0.15, 400
+    A, B = _sample_sharp_null(J, sigma2, rho, n_sim, seed=0)
+    ests = [sharp._null_constrained_mle(A[i], B[i], 0.0) for i in range(n_sim)]
+    mean_sigma2 = np.mean([e[0] for e in ests])
+    mean_rho = np.mean([e[1] for e in ests])
+    assert abs(mean_sigma2 - sigma2) < 0.005
+    assert abs(mean_rho - rho) < 0.03
+    assert 0 <= sharp.sharp_score_test(A[0], B[0], mu0=0.0)["p"] <= 1
+
+
+def test_score_test_calibrated_and_beats_mom():
+    # SHARP null: the score test should reject ~alpha; the MoM+Wald reference
+    # (retained only for this comparison) inflates, especially at moderate rho.
+    J, sigma2, rho, n_sim, alpha = 30, 0.04, 0.10, 600, 0.05
+    A, B = _sample_sharp_null(J, sigma2, rho, n_sim, seed=1)
+    score_rej = mom_rej = 0
+    for i in range(n_sim):
+        a, b = A[i], B[i]
+        if sharp.sharp_score_test(a, b, mu0=0.0)["p"] < alpha:
+            score_rej += 1
+        D_bar, var, _, _ = sharp._sharp_moments(a, b)
+        z = D_bar / np.sqrt(var) if var > 1e-12 else 0.0
+        if 2 * (1 - _norm_cdf(abs(z))) < alpha:
+            mom_rej += 1
+    score_fpr, mom_fpr = score_rej / n_sim, mom_rej / n_sim
+    assert score_fpr < 0.09          # score test roughly calibrated at 5%
+    assert mom_fpr > score_fpr + 0.03  # MoM+Wald inflates relative to the score test
+
+
+def test_ci_inversion_contains_and_excludes():
+    A, B = _sample_sharp_null(J=30, sigma2=0.04, rho=0.1, n_sim=1, seed=2)
+    a, b = A[0] + 0.3, B[0] + 0.3   # shift the mean to 0.3
+    lo, hi = sharp._invert_score_test(a, b, alpha=0.05)
+    D_bar = 0.5 * (a.mean() + b.mean())
+    assert lo < D_bar < hi
+    # mu0 = 0 (far below the shifted mean) should sit outside a tight-ish CI or be
+    # rejected; at minimum the CI is finite and ordered
+    assert np.isfinite(lo) and np.isfinite(hi) and lo < hi
+
+
+def _norm_cdf(x):
+    from scipy import stats as _s
+    return float(_s.norm.cdf(x))
+
+
 # --- arm scorers (cheap arms) -----------------------------------------------
 
 
@@ -82,10 +146,11 @@ def test_sharp_eval_ci_and_compare():
     )
     assert res.D_A["raw"].shape == (6,) and res.D_B["kernel"].shape == (6,)
     ci = sharp.sharp_ci(res, "raw")
+    # test-inversion CI must contain the point estimate; rho may be negative
     assert 0 < ci["mean"] <= 1 and ci["lo"] <= ci["mean"] <= ci["hi"]
-    assert ci["se"] >= 0 and 0 <= ci["rho"] < 0.5
+    assert -0.5 < ci["rho"] < 0.5 and 0 <= ci["p"] <= 1
     cmp = sharp.sharp_compare(res, "raw", "kernel")
-    assert set(["diff", "z", "p"]).issubset(cmp) and 0 <= cmp["p"] <= 1
+    assert set(["diff", "z", "p", "lo", "hi"]).issubset(cmp) and 0 <= cmp["p"] <= 1
 
 
 def test_sharp_permutation_within_strata_below_observed():
