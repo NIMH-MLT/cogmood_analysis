@@ -197,23 +197,30 @@ def ak_univariate(feature: NDArray, y: NDArray, n_perm: int = 2000,
 
 
 def _nested_oof_r2(
-    X: NDArray, target: NDArray, n_splits: int, n_repeats: int, inner_cv: int,
-    l1_grid: list[float], n_alphas: int, seed: int,
+    X_raw: NDArray, target: NDArray, folds: list[list[tuple[NDArray, NDArray]]],
+    inner_cv: int, l1_grid: list[float], n_alphas: int, seed: int,
 ) -> tuple[float, float]:
     """Repeated K-fold out-of-fold R^2 with the elastic-net **selected inside each
     outer training fold** (nested CV; no outcome leakage).
 
-    Standardization is fit on each training fold. Returns true out-of-fold
-    ``R^2 = 1 - SSE/SST`` (on repeat-averaged OOF predictions) and the mean number
-    of selected (nonzero) coefficients across folds.
+    ``folds`` is a precomputed list (one entry per repeat) of ``(train, test)``
+    index pairs, reused identically for the observed outcome and every permutation
+    so the null matches the observed resampling design. Median imputation of missing
+    ``|z|`` and standardization are both **fit on each training fold** (no leakage).
+    Returns true out-of-fold ``R^2 = 1 - SSE/SST`` (on repeat-averaged OOF
+    predictions) and the mean number of selected (nonzero) coefficients.
     """
-    preds = np.zeros((n_repeats, target.shape[0]))
+    preds = np.zeros((len(folds), target.shape[0]))
     n_sel: list[int] = []
-    for rep in range(n_repeats):
-        kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed + rep)
-        for tr, te in kf.split(X):
-            mu, sd = X[tr].mean(0), X[tr].std(0) + 1e-12
-            Xtr, Xte = (X[tr] - mu) / sd, (X[te] - mu) / sd
+    for rep, splits in enumerate(folds):
+        for tr, te in splits:
+            Xtr_raw, Xte_raw = X_raw[tr], X_raw[te]
+            med = np.nanmedian(Xtr_raw, axis=0)                 # imputation fit on train fold
+            med = np.where(np.isfinite(med), med, 0.0)
+            Xtr = np.where(np.isnan(Xtr_raw), med, Xtr_raw)
+            Xte = np.where(np.isnan(Xte_raw), med, Xte_raw)
+            mu, sd = Xtr.mean(0), Xtr.std(0) + 1e-12            # standardize on train fold
+            Xtr, Xte = (Xtr - mu) / sd, (Xte - mu) / sd
             m = ElasticNetCV(l1_ratio=l1_grid, cv=inner_cv, n_alphas=n_alphas,
                              max_iter=5000, random_state=seed).fit(Xtr, target[tr])
             preds[rep, te] = m.predict(Xte)
@@ -225,29 +232,32 @@ def _nested_oof_r2(
     return float(r2), float(np.mean(n_sel))
 
 
-def ak_supervised(absz_imp: NDArray, y: NDArray, n_splits: int = 5,
+def ak_supervised(absz: NDArray, y: NDArray, n_splits: int = 5,
                   n_repeats: int = 2, n_perm: int = 200, seed: int = 0,
                   inner_cv: int = 3, l1_grid: Sequence[float] = (0.5, 0.9, 1.0),
                   n_alphas: int = 30, n_jobs: int = 1) -> dict[str, Any]:
     """Elastic-net on |z| -> out-of-fold R^2 + permutation null (nested selection).
 
-    Hyperparameters are selected by ``ElasticNetCV`` **inside each outer training
-    fold** (no outcome leakage), the statistic is the true out-of-fold
-    ``R^2 = 1 - SSE/SST``, and each permutation re-runs the *complete* nested
-    selection + OOF procedure on shuffled ``y`` so the null matches the observed
-    statistic exactly (fixes the earlier select-once-on-full-data leakage).
+    ``absz`` is the raw ``|z|`` matrix (NaN where QC failed); median imputation is
+    fit inside each outer training fold. Hyperparameters are selected by
+    ``ElasticNetCV`` inside each fold (no outcome leakage); the statistic is the true
+    out-of-fold ``R^2 = 1 - SSE/SST``. The outer folds are precomputed **once** and
+    reused for the observed outcome and every permutation, so the permutation null
+    performs the identical procedure conditional on the resampling design.
     """
     ok = np.isfinite(y)
-    X, yy = absz_imp[ok], y[ok]
+    X, yy = absz[ok], y[ok]
     l1 = list(l1_grid)
-    obs_r2, mean_nsel = _nested_oof_r2(X, yy, n_splits, n_repeats, inner_cv, l1, n_alphas, seed)
+    # identical outer folds for the observed outcome AND all permutations
+    folds = [list(KFold(n_splits=n_splits, shuffle=True, random_state=seed + rep).split(X))
+             for rep in range(n_repeats)]
+    obs_r2, mean_nsel = _nested_oof_r2(X, yy, folds, inner_cv, l1, n_alphas, seed)
 
     rng = np.random.default_rng(seed)
     perms = [rng.permutation(yy) for _ in range(n_perm)]
 
     def _one(i: int) -> float:
-        return _nested_oof_r2(X, perms[i], n_splits, n_repeats, inner_cv, l1,
-                              n_alphas, seed + 1000 + i)[0]
+        return _nested_oof_r2(X, perms[i], folds, inner_cv, l1, n_alphas, seed)[0]
 
     if n_jobs != 1 and n_perm:
         from joblib import Parallel, delayed
@@ -287,12 +297,14 @@ def run_ak(
 ) -> pl.DataFrame:
     """Run all approaches x targets x {raw,resid}; return a tidy results table.
 
-    PC1/resid is flagged as the pre-specified primary; secondary rows get BH-FDR
-    q-values (computed within the secondary set, per approach).
+    The single pre-specified PRIMARY is ``max_abs`` (max|z|) on the PC1-residualized
+    target; every other row (including elastic-net on PC1-resid) is secondary and
+    gets BH-FDR q-values within the secondary set, per approach. The family-wise
+    maxT correction (:func:`maxstat_correction`) covers the five UNSUPERVISED
+    approaches only, not the elastic-net.
     """
     targets = symptom_targets(data)
     feats = deviation_features(data.absz)
-    absz_imp = _impute_absz(data.absz)
 
     rows: list[dict[str, Any]] = []
     for t in targets:
@@ -302,9 +314,11 @@ def run_ak(
                          "primary": t.primary and fname == "max_abs",
                          "effect": res["effect"], "effect_kind": "spearman_r",
                          "p": res["p"], "n": res["n"], "n_selected": None})
-        sup = ak_supervised(absz_imp, t.y, n_perm=n_perm_sup, seed=seed, n_jobs=n_jobs_sup)
+        # elastic-net takes the RAW |z| (NaN kept; imputed inside each outer fold)
+        sup = ak_supervised(data.absz, t.y, n_perm=n_perm_sup, seed=seed, n_jobs=n_jobs_sup)
         rows.append({"approach": "enet", "target": t.name, "variant": t.variant,
-                     "primary": t.primary, "effect": sup["effect"],
+                     "primary": False,  # only max_abs x PC1-resid is the prespecified primary
+                     "effect": sup["effect"],
                      "effect_kind": "oof_r2", "p": sup["p"], "n": sup["n"],
                      "n_selected": sup["n_selected"]})
         if verbose:

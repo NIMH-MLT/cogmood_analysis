@@ -67,13 +67,17 @@ def test_max_beats_distance_under_sparsity():
 
 def test_ak_supervised_recovers_signal_and_null_calibrated():
     absz, y = _ak_absz_and_symptom(n=700, P=30, k=3, effect=2.0, seed=4)
-    Xi = ak._impute_absz(absz)
-    res = ak.ak_supervised(Xi, y, n_repeats=2, n_perm=60, seed=0)
+    # inject some missing |z| to exercise the in-fold median imputation
+    rng0 = np.random.default_rng(11)
+    absz = absz.copy()
+    mask = rng0.random(absz.shape) < 0.05
+    absz[mask] = np.nan
+    res = ak.ak_supervised(absz, y, n_repeats=2, n_perm=60, seed=0)     # raw |z| (imputed in-fold)
     assert res["effect"] > 0 and res["p"] < 0.1            # detects
     assert 1 <= res["n_selected"] <= 30
-    # permuted target -> no predictive signal
+    # permuted target -> no predictive signal; identical folds used for obs + perms
     rng = np.random.default_rng(5)
-    res0 = ak.ak_supervised(Xi, rng.permutation(y), n_repeats=2, n_perm=60, seed=0)
+    res0 = ak.ak_supervised(absz, rng.permutation(y), n_repeats=2, n_perm=60, seed=0)
     assert res0["effect"] < 0.02
 
 

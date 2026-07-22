@@ -258,13 +258,22 @@ class Deviations:
 
 
 def compute_deviations(
-    df: pl.DataFrame, diag: pl.DataFrame, models: dict[str, ParamNorm]
+    df: pl.DataFrame, diag: pl.DataFrame, models: dict[str, ParamNorm],
+    cross_fit_hv: bool = False, k: int = 5, seed: int = 0,
+    hv_column: str = HV_COLUMN, hv_value: str = HV_VALUE,
 ) -> Deviations:
     """Deviation z / centile / extremeness-indicator for every subject.
 
     QC-failing (non-converged / missing) estimates are set to NaN in ``z`` and
     ``centile``, 0 in ``indicator``, and False in ``qc_ok``.
+
+    ``cross_fit_hv=True`` gives the healthy-volunteer subjects **out-of-fold**
+    deviations (k-fold within HV: each HV fold scored by a norm fit on the other HV
+    folds), so HV are not scored in-sample by a norm fit on themselves; non-HV
+    subjects are scored from the full HV reference ``models`` as usual.
     """
+    from sklearn.model_selection import KFold
+
     params = list(models.keys())
     n = df.height
     age = df[COVARIATE_AGE].to_numpy().astype(float)
@@ -274,14 +283,45 @@ def compute_deviations(
     for j, p in enumerate(params):
         ok = _hv_qc_mask(df, diag, p)
         zj = models[p].z(df[p].to_numpy(), age, sex)
-        zj = np.where(ok, zj, np.nan)
-        Z[:, j] = zj
+        Z[:, j] = np.where(ok, zj, np.nan)
         qc[:, j] = ok
+
+    if cross_fit_hv:
+        is_hv = (df[hv_column] == hv_value).to_numpy()
+        for j, p in enumerate(params):
+            x = df[p].to_numpy()
+            idx = np.where(is_hv & qc[:, j])[0]      # QC-good HV for this param
+            if len(idx) < max(2 * k, 30):
+                continue
+            kf = KFold(n_splits=k, shuffle=True, random_state=seed)
+            for tr, te in kf.split(idx):
+                m = _fit_param(x[idx[tr]], age[idx[tr]], sex[idx[tr]], p)
+                Z[idx[te], j] = m.z(x[idx[te]], age[idx[te]], sex[idx[te]])
+
     centile = stats.norm.cdf(Z)
     indicator = np.where(np.isnan(Z), 0.0, np.where(Z > INDICATOR_Z, 1.0,
                          np.where(Z < -INDICATOR_Z, -1.0, 0.0)))
     return Deviations(sub_ids=df["sub_id"].to_numpy().astype(str), params=params,
                       z=Z, centile=centile, indicator=indicator, qc_ok=qc)
+
+
+def clipping_fraction(df: pl.DataFrame, models: dict[str, ParamNorm]) -> dict[str, float]:
+    """Per-parameter fraction of subjects whose transformed value hits the fitted
+    clip bounds ``[t_lo, t_hi]`` (quantifies how often the transform extrapolation
+    guard attenuates extreme deviations)."""
+    out: dict[str, float] = {}
+    for p, m in models.items():
+        x = df[p].to_numpy().astype(float)
+        x = x[np.isfinite(x)]
+        if x.size == 0:
+            out[p] = 0.0
+            continue
+        if m.kind == "log":
+            t = np.log(np.clip(x, 1e-12, None))
+        else:
+            t = m.pt.transform(x.reshape(-1, 1)).ravel()
+        out[p] = float(((t < m.t_lo) | (t > m.t_hi)).mean())
+    return out
 
 
 # --- calibration check (k-fold within HV) -----------------------------------
