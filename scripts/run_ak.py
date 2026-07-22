@@ -6,11 +6,13 @@ writes the tidy results table to ``data/exploratory/ak_results.parquet`` (gitign
 The held-out half is never read.
 """
 
+import os
 from pathlib import Path
 
 import polars as pl
 
 from cogmood_analysis import anna_karenina as ak
+from cogmood_analysis import provenance as prov
 
 REPO = Path(__file__).resolve().parents[1]
 PKL = REPO / "data" / "exploratory" / "normative_deviations.pkl"
@@ -19,12 +21,23 @@ OUT = REPO / "data" / "exploratory" / "ak_results.parquet"
 
 
 def main() -> None:
+    n_jobs = int(os.environ.get("AK_NJOBS", "8"))
     data = ak.load_ak_data(PKL, CSV)
     print(f"AK sample: N={data.sub_ids.shape[0]} | {len(data.params)} params "
-          f"| {len(data.symptom_cols)} symptom targets | HV in sample={int(data.is_hv.sum())}")
-    tbl = ak.run_ak(data, seed=0, verbose=True)
+          f"| {len(data.symptom_cols)} symptom targets | HV in sample={int(data.is_hv.sum())} "
+          f"| n_jobs_sup={n_jobs}")
+    tbl = ak.run_ak(data, seed=0, verbose=True, n_jobs_sup=n_jobs)
     tbl.write_parquet(OUT)
-    print(f"\nWrote {OUT} ({tbl.height} rows)")
+    # provenance sidecar (parquet metadata is awkward for nested dicts)
+    provenance = prov.provenance(
+        CSV, data.sub_ids,
+        config={"analysis": "anna_karenina", "n_perm_uni": 2000, "n_perm_sup": 200,
+                "supervised": "nested_elasticnetcv_oof_r2", "seed": 0,
+                "n_targets": int(tbl["target"].n_unique())},
+    )
+    prov.write_sidecar(OUT, provenance)
+    print(f"\nWrote {OUT} ({tbl.height} rows) + provenance sidecar "
+          f"(commit={str(provenance['source_commit'])[:9]} dirty={provenance['dirty']})")
 
     primary = tbl.filter(
         (pl.col("target") == "PC1")

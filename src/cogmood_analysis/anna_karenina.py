@@ -196,44 +196,68 @@ def ak_univariate(feature: NDArray, y: NDArray, n_perm: int = 2000,
     return {"effect": float(r), "p": float(p), "n": int(ok.sum())}
 
 
-def ak_supervised(absz_imp: NDArray, y: NDArray, n_splits: int = 5,
-                  n_repeats: int = 4, n_perm: int = 200, seed: int = 0) -> dict[str, Any]:
-    """Elastic-net on |z| -> out-of-fold r^2 + permutation null.
+def _nested_oof_r2(
+    X: NDArray, target: NDArray, n_splits: int, n_repeats: int, inner_cv: int,
+    l1_grid: list[float], n_alphas: int, seed: int,
+) -> tuple[float, float]:
+    """Repeated K-fold out-of-fold R^2 with the elastic-net **selected inside each
+    outer training fold** (nested CV; no outcome leakage).
 
-    Hyperparameters (alpha, l1_ratio) are chosen once via CV on the full sample;
-    OOF predictions use repeated K-fold refits at those hyperparameters. The
-    permutation null redoes the identical OOF procedure on shuffled y, so its
-    p-value is valid (the observed r^2 is mildly optimistic but the null matches).
+    Standardization is fit on each training fold. Returns true out-of-fold
+    ``R^2 = 1 - SSE/SST`` (on repeat-averaged OOF predictions) and the mean number
+    of selected (nonzero) coefficients across folds.
+    """
+    preds = np.zeros((n_repeats, target.shape[0]))
+    n_sel: list[int] = []
+    for rep in range(n_repeats):
+        kf = KFold(n_splits=n_splits, shuffle=True, random_state=seed + rep)
+        for tr, te in kf.split(X):
+            mu, sd = X[tr].mean(0), X[tr].std(0) + 1e-12
+            Xtr, Xte = (X[tr] - mu) / sd, (X[te] - mu) / sd
+            m = ElasticNetCV(l1_ratio=l1_grid, cv=inner_cv, n_alphas=n_alphas,
+                             max_iter=5000, random_state=seed).fit(Xtr, target[tr])
+            preds[rep, te] = m.predict(Xte)
+            n_sel.append(int((np.abs(m.coef_) > 1e-8).sum()))
+    pred = preds.mean(0)
+    ss_res = float(np.sum((target - pred) ** 2))
+    ss_tot = float(np.sum((target - target.mean()) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    return float(r2), float(np.mean(n_sel))
+
+
+def ak_supervised(absz_imp: NDArray, y: NDArray, n_splits: int = 5,
+                  n_repeats: int = 2, n_perm: int = 200, seed: int = 0,
+                  inner_cv: int = 3, l1_grid: Sequence[float] = (0.5, 0.9, 1.0),
+                  n_alphas: int = 30, n_jobs: int = 1) -> dict[str, Any]:
+    """Elastic-net on |z| -> out-of-fold R^2 + permutation null (nested selection).
+
+    Hyperparameters are selected by ``ElasticNetCV`` **inside each outer training
+    fold** (no outcome leakage), the statistic is the true out-of-fold
+    ``R^2 = 1 - SSE/SST``, and each permutation re-runs the *complete* nested
+    selection + OOF procedure on shuffled ``y`` so the null matches the observed
+    statistic exactly (fixes the earlier select-once-on-full-data leakage).
     """
     ok = np.isfinite(y)
     X, yy = absz_imp[ok], y[ok]
-    Xs = (X - X.mean(0)) / (X.std(0) + 1e-12)
-    cv = ElasticNetCV(l1_ratio=[.3, .5, .7, .9, 1.0], cv=5, n_alphas=40,
-                      max_iter=5000, random_state=seed).fit(Xs, yy)
-    alpha, l1 = cv.alpha_, cv.l1_ratio_
+    l1 = list(l1_grid)
+    obs_r2, mean_nsel = _nested_oof_r2(X, yy, n_splits, n_repeats, inner_cv, l1, n_alphas, seed)
 
-    def oof_r2(target: NDArray, s: int) -> tuple[float, NDArray]:
-        pred = np.zeros_like(target)
-        for rep in range(n_repeats):
-            kf = KFold(n_splits=n_splits, shuffle=True, random_state=s + rep)
-            p = np.zeros_like(target)
-            for tr, te in kf.split(Xs):
-                m = ElasticNet(alpha=alpha, l1_ratio=l1, max_iter=5000).fit(Xs[tr], target[tr])
-                p[te] = m.predict(Xs[te])
-            pred += p
-        pred /= n_repeats
-        r = np.corrcoef(pred, target)[0, 1] if pred.std() > 0 else 0.0
-        return float(np.sign(r) * r**2), pred
-
-    obs_r2, _ = oof_r2(yy, seed)
     rng = np.random.default_rng(seed)
-    null = np.array([oof_r2(rng.permutation(yy), seed + 1000 + i)[0] for i in range(n_perm)])
+    perms = [rng.permutation(yy) for _ in range(n_perm)]
+
+    def _one(i: int) -> float:
+        return _nested_oof_r2(X, perms[i], n_splits, n_repeats, inner_cv, l1,
+                              n_alphas, seed + 1000 + i)[0]
+
+    if n_jobs != 1 and n_perm:
+        from joblib import Parallel, delayed
+        null = np.array(Parallel(n_jobs=n_jobs)(delayed(_one)(i) for i in range(n_perm)))
+    else:
+        null = np.array([_one(i) for i in range(n_perm)])
+
     p = (np.sum(null >= obs_r2) + 1) / (n_perm + 1)
-    # nonzero-coefficient parameters at the chosen hyperparameters (full-sample fit)
-    coef = ElasticNet(alpha=alpha, l1_ratio=l1, max_iter=5000).fit(Xs, yy).coef_
     return {"effect": obs_r2, "p": float(p), "n": int(ok.sum()),
-            "n_selected": int((np.abs(coef) > 1e-8).sum()), "alpha": float(alpha),
-            "l1_ratio": float(l1), "coef": coef}
+            "n_selected": int(round(mean_nsel)), "n_perm": int(n_perm)}
 
 
 # --- orchestration ----------------------------------------------------------
@@ -259,6 +283,7 @@ def run_ak(
     n_perm_sup: int = 200,
     seed: int = 0,
     verbose: bool = True,
+    n_jobs_sup: int = 1,
 ) -> pl.DataFrame:
     """Run all approaches x targets x {raw,resid}; return a tidy results table.
 
@@ -277,7 +302,7 @@ def run_ak(
                          "primary": t.primary and fname == "max_abs",
                          "effect": res["effect"], "effect_kind": "spearman_r",
                          "p": res["p"], "n": res["n"], "n_selected": None})
-        sup = ak_supervised(absz_imp, t.y, n_perm=n_perm_sup, seed=seed)
+        sup = ak_supervised(absz_imp, t.y, n_perm=n_perm_sup, seed=seed, n_jobs=n_jobs_sup)
         rows.append({"approach": "enet", "target": t.name, "variant": t.variant,
                      "primary": t.primary, "effect": sup["effect"],
                      "effect_kind": "oof_r2", "p": sup["p"], "n": sup["n"],
