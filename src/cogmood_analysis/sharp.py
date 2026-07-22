@@ -775,35 +775,78 @@ def _sharp_moments(
     return float(D_bar), float(max(var_Dbar, 0.0)), sigma2, rho
 
 
-def _quadratic_form(a: NDArray, b: NDArray, mu0: float, rho: float, J: int) -> float:
-    """r^T R(rho)^-1 r for r = [a-mu0, b-mu0], via the eigendecomposition of R."""
+def _profile_stats(a: NDArray, b: NDArray, mu0: float, J: int) -> tuple[float, float, float]:
+    """Sufficient statistics (s0sq, Su2, Sv2) for the profiled rho-likelihood."""
     rA, rB = a - mu0, b - mu0
     u = (rA + rB) / np.sqrt(2.0)          # symmetric coords
     v = (rA - rB) / np.sqrt(2.0)          # antisymmetric coords (lambda3 = 1)
     Su2, Sv2 = float(u @ u), float(v @ v)
     s0sq = (u.sum() ** 2) / J             # energy on the all-ones direction
+    return s0sq, Su2, Sv2
+
+
+def _quadratic_form(a: NDArray, b: NDArray, mu0: float, rho: float, J: int) -> float:
+    """r^T R(rho)^-1 r for r = [a-mu0, b-mu0], via the eigendecomposition of R."""
+    s0sq, Su2, Sv2 = _profile_stats(a, b, mu0, J)
     lam1 = 1.0 + 2.0 * rho * (J - 1)
     lam2 = 1.0 - 2.0 * rho
     return s0sq / lam1 + (Su2 - s0sq) / lam2 + Sv2
 
 
-def _null_constrained_mle(a: NDArray, b: NDArray, mu0: float) -> tuple[float, float]:
-    """MLE of (sigma^2, rho) with the mean fixed at ``mu0`` (Gaussian likelihood).
+def _neg2ll_grid(rho, s0sq: float, Su2: float, Sv2: float, J: int):
+    """-2 log-likelihood (up to a constant) at rho (scalar or array), vectorized."""
+    rho = np.asarray(rho, float)
+    lam1 = 1.0 + 2.0 * rho * (J - 1)
+    lam2 = 1.0 - 2.0 * rho
+    q = s0sq / lam1 + (Su2 - s0sq) / lam2 + Sv2
+    return 2 * J * np.log(np.maximum(q, 1e-300)) + np.log(lam1) + (J - 1) * np.log(lam2)
 
-    Concentrates sigma^2 = qform/(2J) and profiles the 1-D objective
-    ``2J log(qform(rho)) + log|R(rho)|`` over the PD interval for rho.
+
+def _null_constrained_mle(
+    a: NDArray, b: NDArray, mu0: float, n_grid: int = 400, return_info: bool = False
+):
+    """Global MLE of (sigma^2, rho) with the mean fixed at ``mu0``.
+
+    The profiled objective ``2J log(qform(rho)) + log|R(rho)|`` is **multimodal**
+    (competing +inf/-inf as rho approaches the two PD boundaries), so a single
+    bounded minimization can land in a non-global basin. We instead evaluate the
+    objective on a dense grid over the PD interval ``(-1/(2(J-1)), 1/2)``, bracket
+    every interior local minimum and both boundaries, refine each candidate, and
+    return the global optimum. Set ``return_info`` for optimizer diagnostics.
     """
     J = a.size
     lo, hi = -1.0 / (2.0 * (J - 1)) + 1e-9, 0.5 - 1e-9
+    s0sq, Su2, Sv2 = _profile_stats(a, b, mu0, J)
 
-    def neg2ll(rho: float) -> float:
-        q = _quadratic_form(a, b, mu0, rho, J)
-        logdetR = np.log(1.0 + 2.0 * rho * (J - 1)) + (J - 1) * np.log(1.0 - 2.0 * rho)
-        return 2 * J * np.log(max(q, 1e-300)) + logdetR
+    grid = np.linspace(lo, hi, n_grid)
+    obj = _neg2ll_grid(grid, s0sq, Su2, Sv2, J)
 
-    res = optimize.minimize_scalar(neg2ll, bounds=(lo, hi), method="bounded")
-    rho0 = float(res.x)
+    def scal(rho: float) -> float:
+        return float(_neg2ll_grid(rho, s0sq, Su2, Sv2, J))
+
+    cand_rho: list[float] = []
+    cand_obj: list[float] = []
+    # interior local minima: obj[i] <= both neighbours -> refine within the bracket
+    interior = np.where((obj[1:-1] <= obj[:-2]) & (obj[1:-1] <= obj[2:]))[0] + 1
+    for i in interior:
+        r = optimize.minimize_scalar(scal, bounds=(grid[i - 1], grid[i + 1]), method="bounded")
+        cand_rho.append(float(r.x)); cand_obj.append(float(r.fun))
+    # both boundaries (narrow basins can hug the PD edges)
+    for aa, bb in ((grid[0], grid[2]), (grid[-3], grid[-1])):
+        r = optimize.minimize_scalar(scal, bounds=(aa, bb), method="bounded")
+        cand_rho.append(float(r.x)); cand_obj.append(float(r.fun))
+    # raw grid argmin as a safety net
+    gi = int(np.argmin(obj))
+    cand_rho.append(float(grid[gi])); cand_obj.append(float(obj[gi]))
+
+    k = int(np.argmin(cand_obj))
+    rho0 = cand_rho[k]
     sigma2_0 = _quadratic_form(a, b, mu0, rho0, J) / (2 * J)
+    if return_info:
+        info = {"n_local_minima": int(len(interior)), "n_candidates": len(cand_obj),
+                "obj": float(cand_obj[k]), "rho": rho0,
+                "grid_argmin_gap": float(obj[gi] - cand_obj[k])}
+        return sigma2_0, rho0, info
     return sigma2_0, rho0
 
 
