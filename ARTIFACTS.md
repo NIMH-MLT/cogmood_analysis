@@ -17,8 +17,11 @@ Common inputs (this remediation round):
 | artifact | analysis | N | source commit | key config | created (UTC) |
 |---|---|---|---|---|---|
 | `sharp_ladder_results_rhat1p1.pkl` | CCA ladder (7 arms) + SHARP | 1298 | `509551e2` | J=30, K=5; inference=score_test; signed correlations; exclude_rhat_above=1.1; n_perm raw/kernel=1000, deep/fm/tabfm=100, fm_deep/tabfm_deep=50; seed=0 | 2026-07-22 |
-| `ak_results.parquet` (+ `.provenance.json`) | Anna Karenina deviation→symptom | 1298 | round-2 | unsupervised (max\|z\|/top-k/count/dist) + elastic-net (nested ElasticNetCV, true OOF R², in-fold imputation, identical folds obs+perm); n_perm_uni=2000, n_perm_sup=200; seed=0 | 2026-07-22 |
-| `normative_deviations.pkl` (+ `.provenance.json`) | training-half HV normative deviations (HV cross-fit) | 1298 (285 HV) | round-2 | per-parameter QC (rhat≤1.1 & ess≥400) + subject max_rhat>1.1 exclusion; **HV out-of-fold** deviations; transform clipping negligible (≤0.62%) | 2026-07-22 |
+| `ak_results.parquet` (+ `.provenance.json`) | Anna Karenina deviation→symptom | 1298 | `6c4b62fe` | unsupervised (max\|z\|/top-k/count/dist) + supervised elastic-net (nested ElasticNetCV, true OOF R²); n_perm_uni=2000, n_perm_sup=200; seed=0 | 2026-07-22 |
+| `normative_deviations.pkl` | training-half HV normative deviations | 1298 (285 HV) | (pre-provenance build) | per-parameter QC (rhat≤1.1 & ess≥400) + subject max_rhat>1.1 exclusion; log/Yeo-Johnson transforms | 2026-07-22 |
+| `xgb_nonlinear_results.parquet` (+ `.provenance.json`) | XGBoost full-vs-null (age+sex+30 params) + SHARP | 1298 | `d9a0578a` | J=30, K=5; one-sided score test; raw d_a/d_b retained; depth-3 early-stopped XGB; seed=0 | 2026-07-22 |
+| `xgb_subscores_sharp_results.parquet` (+ `.provenance.json`) | XGBoost full-vs-null (age+sex+4 task scores) + SHARP | 1298 | `d9a0578a` | J=30, K=5; one-sided score test; raw d_a/d_b retained; seed=0 | 2026-07-22 |
+| `xgb_kfold_results.parquet` | full-sample K-fold R² cross-check (no SHARP) | 1298 | (descriptive; pre-provenance) | repeated 5-fold, n_reps=20; descriptive R² gains only (unaffected by the inference fix) | 2026-07-22 |
 
 Notes:
 - The `sharp_ladder_results_rhat1p1.pkl` `provenance.dirty` flag is `true` because the
