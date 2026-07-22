@@ -63,10 +63,18 @@ from sklearn.model_selection import StratifiedKFold
 
 from . import shared_variance as sv
 
-#: The ladder, from least to most flexible.
-LADDER: tuple[str, ...] = (
-    "raw", "kernel", "deep", "fm", "fm_deep", "tabfm", "tabfm_deep",
-)
+#: The ladder used for the scientific comparison, from least to most flexible.
+#: The frozen FM arms (``fm``, ``tabfm``) use leakage-free cross-fitted embeddings
+#: (``shared_variance.embed_view_fm``). The jointly fine-tuned arms are EXCLUDED
+#: (see ``FINETUNED_ARMS``): a leakage-free version would require nested cross-fit of
+#: the fine-tuning itself (the fine-tuned weights see all train rows), which is
+#: computationally infeasible here -- so they are dropped from comparative claims.
+LADDER: tuple[str, ...] = ("raw", "kernel", "deep", "fm", "tabfm")
+
+#: Fine-tuned arms retained in the code (and opt-in smoke tests) but excluded from
+#: the ladder/analysis because their train representations cannot be made
+#: leakage-free at feasible cost.
+FINETUNED_ARMS: tuple[str, ...] = ("fm_deep", "tabfm_deep")
 
 
 @dataclass

@@ -41,7 +41,7 @@ import numpy as np
 import polars as pl
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
-from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
+from sklearn.model_selection import KFold, StratifiedKFold, StratifiedShuffleSplit
 from sklearn.preprocessing import StandardScaler
 
 from . import survey_helpers as sh
@@ -210,60 +210,59 @@ def embed_view_raw(
     return _standardize(X_train, X_test)
 
 
+def _cross_fit_indices(n: int, k: int, seed: int) -> list[tuple[NDArray, NDArray]]:
+    """Cross-fit folds: each of the ``n`` rows is queried exactly once against a
+    context (``ctx_idx``) that **excludes it** (``q_idx``). Guarantees no queried
+    row appears in its own support -- the leakage-free discipline for FM embeddings.
+    """
+    kf = KFold(n_splits=min(k, n), shuffle=True, random_state=seed)
+    idx = np.arange(n)
+    return [(ctx, q) for ctx, q in kf.split(idx)]  # ctx = K-1 folds, q = held-out fold
+
+
+def _pseudo_target(X: NDArray[np.float64], pseudo_target: str, seed: int) -> NDArray[np.float64]:
+    if pseudo_target == "pca1":
+        return PCA(n_components=1, random_state=seed).fit_transform(X).ravel()
+    if pseudo_target == "col0":
+        return X[:, 0].copy()
+    raise ValueError(f"unknown pseudo_target {pseudo_target!r}")
+
+
 def embed_view_fm(
     X_train: NDArray[np.float64],
     X_test: NDArray[np.float64],
     reduce: str = "mean",
     pseudo_target: str = "pca1",
-    train_data_source: str = "test",
     device: str = "auto",
     ignore_pretraining_limits: bool = True,
+    cross_fit: bool = True,
+    n_cross_fit: int = 5,
     seed: int = 0,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Embed a single view with TabPFN, fit on TRAIN and applied to TEST.
 
-    Uses the native ``TabPFNRegressor.get_embeddings`` API (tabpfn 2.x), which
-    needs no license token. A within-view pseudo-target is used so the
-    embedding carries no cross-view information (see module docstring): the
-    model is fit on the training view with that pseudo-target, train
-    embeddings are read with ``data_source="train"`` and test embeddings with
-    ``data_source="test"`` (the training set is the frozen in-context
-    reference; test labels are never seen). ``tabpfn`` is imported lazily so
-    the rest of the module (and its tests) work without it installed.
+    Uses the native ``TabPFNRegressor.get_embeddings`` API (tabpfn 2.x). A
+    within-view pseudo-target (PC1 of the *context* rows) is used so the embedding
+    carries no cross-view information; each view is embedded in isolation.
+
+    **Leakage-free cross-fitting** (``cross_fit=True``, default): TRAIN embeddings
+    are produced by K-fold cross-fitting - each training fold is embedded as a
+    query against a TabPFN context built from the *other* folds only, so no queried
+    training row ever appears in its own labeled support (``_cross_fit_indices``).
+    TEST rows are embedded against the full-train context (they are never in any
+    context). This removes the support/query asymmetry the earlier version had
+    (train rows queried against a context containing themselves). ``cross_fit=False``
+    restores the fast single-fit behaviour (train rows in their own context) and is
+    kept only for tests.
 
     Parameters
     ----------
-    X_train, X_test : the view's raw feature matrices.
-    reduce : how to collapse the ``(n_estimators, n, d)`` output - ``"mean"``
-        or ``"first"``. The same rule is applied to train and test.
-    pseudo_target : ``"pca1"`` (first PC of the training view) or ``"col0"``
-        (first standardized column) - used only as the supervised target the
-        embedder requires; report sensitivity to this choice.
-    train_data_source : ``data_source`` passed when embedding the TRAIN rows.
-        ``"test"`` (default) embeds train rows in the same query regime as the
-        held-out rows so the two embedding distributions match - this transfers
-        markedly better than ``"train"``.
+    reduce : collapse the ``(n_estimators, n, d)`` output - ``"mean"`` / ``"first"``.
+    pseudo_target : ``"pca1"`` or ``"col0"`` (fit on each context; report sensitivity).
+    n_cross_fit : number of cross-fit folds for the train embeddings.
+    device, ignore_pretraining_limits, seed : passed to ``TabPFNRegressor``.
 
-        CAVEAT (support/query asymmetry): the in-context reference is the fitted
-        ``X_train`` (with its within-view pseudo-target). TRAIN rows are therefore
-        queried against a context that *contains labeled copies of themselves*,
-        whereas TEST rows are absent from their context. This can leak the
-        within-view pseudo-target into the train representations and optimistically
-        bias the CCA fit for the FM arms. It is a within-view effect only (the
-        pseudo-target carries no cross-view information), and because the FM arms
-        do not beat the linear ``raw`` baseline the direction is conservative for
-        the study's conclusion. A leakage-free fix would require per-row
-        leave-one-out contexts (not supported by the TabPFN embedding API) and is
-        not implemented; the caveat is reported instead.
-    device : ``"auto"`` (use CUDA if available, else CPU), ``"cpu"`` or
-        ``"cuda"``.
-    ignore_pretraining_limits : pass through to ``TabPFNRegressor``. Required to
-        embed >1000 rows on CPU (TabPFN otherwise refuses for performance).
-    seed : random seed for the embedder.
-
-    Returns
-    -------
-    (E_train, E_test) as 2D float arrays.
+    Returns ``(E_train, E_test)`` as 2D float arrays.
     """
     from tabpfn import TabPFNRegressor  # lazy import
 
@@ -274,22 +273,28 @@ def embed_view_fm(
 
     Xtr, Xte = _standardize(X_train, X_test)
 
-    if pseudo_target == "pca1":
-        y = PCA(n_components=1, random_state=seed).fit_transform(Xtr).ravel()
-    elif pseudo_target == "col0":
-        y = Xtr[:, 0].copy()
-    else:
-        raise ValueError(f"unknown pseudo_target {pseudo_target!r}")
+    def _fit(Xc: NDArray) -> "TabPFNRegressor":
+        reg = TabPFNRegressor(device=device, random_state=seed,
+                              ignore_pretraining_limits=ignore_pretraining_limits)
+        reg.fit(Xc, _pseudo_target(Xc, pseudo_target, seed))
+        return reg
 
-    reg = TabPFNRegressor(
-        device=device,
-        random_state=seed,
-        ignore_pretraining_limits=ignore_pretraining_limits,
-    )
-    reg.fit(Xtr, y)
-    E_tr = np.asarray(reg.get_embeddings(Xtr, data_source=train_data_source))
-    E_te = np.asarray(reg.get_embeddings(Xte, data_source="test"))
-    return _reduce_embedding(E_tr, reduce), _reduce_embedding(E_te, reduce)
+    # TEST embeddings: full-train context (test rows never appear in it)
+    reg_full = _fit(Xtr)
+    E_te = _reduce_embedding(np.asarray(reg_full.get_embeddings(Xte, data_source="test")), reduce)
+
+    if not cross_fit:
+        E_tr = _reduce_embedding(
+            np.asarray(reg_full.get_embeddings(Xtr, data_source="test")), reduce)
+        return E_tr, E_te
+
+    # TRAIN embeddings: cross-fitted so no queried row is in its own context
+    E_tr = np.empty((Xtr.shape[0], E_te.shape[1]), dtype=np.float64)
+    for ctx_idx, q_idx in _cross_fit_indices(Xtr.shape[0], n_cross_fit, seed):
+        reg = _fit(Xtr[ctx_idx])
+        E_tr[q_idx] = _reduce_embedding(
+            np.asarray(reg.get_embeddings(Xtr[q_idx], data_source="test")), reduce)
+    return E_tr, E_te
 
 
 # --- Google TabFM embeddings ------------------------------------------------
@@ -387,15 +392,17 @@ def embed_view_tabfm(
     X_test: NDArray[np.float64],
     pseudo_target: str = "pca1",
     device: str = "auto",
+    cross_fit: bool = True,
+    n_cross_fit: int = 5,
     seed: int = 0,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Embed one view with Google TabFM (frozen), fit on TRAIN, applied to TEST.
 
-    Mirrors :func:`embed_view_fm` but uses TabFM's per-row representation
-    (dim ``TABFM_EMBED_DIM``). TabFM is target-conditioned (its cell embedder
-    takes ``y``), so a within-view PC1 pseudo-target is used - each view is
-    embedded in isolation, no cross-view leakage. Train rows are embedded as
-    queries against the train context, the same regime as the test rows.
+    Mirrors :func:`embed_view_fm` (including the leakage-free ``cross_fit`` path):
+    TRAIN rows are embedded by cross-fitting (each fold queried against a context of
+    the other folds), TEST rows against the full-train context. TabFM is
+    target-conditioned, so a within-view PC1 pseudo-target (fit on each context) is
+    used - each view embedded in isolation, no cross-view leakage.
     """
     import torch
 
@@ -404,19 +411,28 @@ def embed_view_tabfm(
     Xtr, Xte = _standardize(X_train, X_test)
     Xtr = Xtr.astype(np.float32)
     Xte = Xte.astype(np.float32)
-    if pseudo_target == "pca1":
-        y = PCA(1, random_state=seed).fit_transform(Xtr).ravel().astype(np.float32)
-    elif pseudo_target == "col0":
-        y = Xtr[:, 0].astype(np.float32).copy()
-    else:
-        raise ValueError(f"unknown pseudo_target {pseudo_target!r}")
     model = _load_tabfm(device)
-    E_tr = tabfm_query_embeddings(model, Xtr, y, Xtr, device, grad=False)
-    E_te = tabfm_query_embeddings(model, Xtr, y, Xte, device, grad=False)
-    return (
-        E_tr.detach().cpu().numpy().astype(np.float64),
-        E_te.detach().cpu().numpy().astype(np.float64),
-    )
+
+    def _ctx_y(Xc: NDArray) -> NDArray:
+        return _pseudo_target(Xc, pseudo_target, seed).astype(np.float32)
+
+    def _to_np(E):
+        return E.detach().cpu().numpy().astype(np.float64)
+
+    # TEST: full-train context
+    E_te = _to_np(tabfm_query_embeddings(model, Xtr, _ctx_y(Xtr), Xte, device, grad=False))
+
+    if not cross_fit:
+        E_tr = _to_np(tabfm_query_embeddings(model, Xtr, _ctx_y(Xtr), Xtr, device, grad=False))
+        return E_tr, E_te
+
+    # TRAIN: cross-fitted (no queried row in its own context)
+    E_tr = np.empty((Xtr.shape[0], E_te.shape[1]), dtype=np.float64)
+    for ctx_idx, q_idx in _cross_fit_indices(Xtr.shape[0], n_cross_fit, seed):
+        Xc = Xtr[ctx_idx]
+        E_tr[q_idx] = _to_np(
+            tabfm_query_embeddings(model, Xc, _ctx_y(Xc), Xtr[q_idx], device, grad=False))
+    return E_tr, E_te
 
 
 def _reduce_embedding(E: NDArray[np.float64], reduce: str) -> NDArray[np.float64]:

@@ -88,6 +88,17 @@ def test_load_views_rhat_exclusion():
 # --- pure-numpy helpers -----------------------------------------------------
 
 
+def test_cross_fit_indices_disjoint_and_complete():
+    # every row is queried exactly once, against a context that excludes it
+    n, k = 53, 5
+    folds = sv._cross_fit_indices(n, k, seed=0)
+    queried = np.concatenate([q for _, q in folds])
+    assert sorted(queried.tolist()) == list(range(n))          # each row queried once
+    for ctx, q in folds:
+        assert set(ctx).isdisjoint(set(q))                     # query row not in its own support
+        assert len(ctx) + len(q) <= n and len(ctx) == n - len(q)
+
+
 def test_reduce_embedding_rules():
     E = np.arange(2 * 3 * 4, dtype=float).reshape(2, 3, 4)  # (n_est, n, d)
     np.testing.assert_allclose(sv._reduce_embedding(E, "mean"), E.mean(axis=0))

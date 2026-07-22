@@ -60,10 +60,11 @@ def main() -> None:
             "tabfm_deep": sharp.ArmConfig(n_pca=5, ft_epochs=6),
         }
     else:
-        J, K = 30, 5
+        # paper-scale repetitions (J=60, K=5). Permutation nulls kept at >=100 so no
+        # arm sits at a coarse p-floor; the cross-fitted FM arms are the compute long pole.
+        J, K = 60, 5
         J_perm, K_perm = 5, 3
-        n_perm = {"raw": 1000, "kernel": 1000, "deep": 100, "fm": 100, "fm_deep": 50,
-                  "tabfm": 100, "tabfm_deep": 50}
+        n_perm = {"raw": 1000, "kernel": 1000, "deep": 200, "fm": 100, "tabfm": 100}
         configs = sharp.DEFAULT_CONFIGS
 
     perm_arms = arms
