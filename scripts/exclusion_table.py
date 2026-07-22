@@ -2,7 +2,9 @@
 
 Reconstructs the CONSORT-style funnel from raw recruitment down to the
 analysis-eligible cohort and its 50/50 train/test split, plus a per-reason
-breakdown of the behavioral and model-fit exclusions.
+breakdown of the behavioral and model-fit exclusions. The funnel also shows the
+model-fit convergence exclusion (any-task ``max_rhat > 1.1``) applied to the
+training half by the CCA / XGBoost / AK analyses (1399 -> 1298).
 
 Data sources (under ``data/``):
 - survey/survey_responses.csv          -- one row per subject with a survey response
@@ -40,6 +42,10 @@ TASKS = ["flkr", "cab", "rdm", "bart"]
 TASK_LABEL = {"flkr": "Flanker", "cab": "CAB", "rdm": "RDM", "bart": "BART"}
 ACC_THRESH = {"bart": "24/36", "cab": "57/96", "rdm": "105/186", "flkr": "57/96"}
 
+#: Model-fit convergence exclusion applied by the CCA / XGBoost / AK analyses:
+#: drop subjects whose ``{task}__max_rhat`` exceeds this on any task.
+RHAT_MAX = 1.1
+
 
 def _fit_subjects(task: str) -> set[str]:
     df = pl.read_csv(DATA / "task" / f"{task}_results.csv", infer_schema_length=20000)
@@ -72,6 +78,14 @@ def main() -> None:
     n_train = td["sub_id"].n_unique()
     n_test = n_eligible - n_train
 
+    # model-fit convergence exclusion on the training half (matches sv.load_views):
+    # drop subjects with any-task max_rhat > 1.1 (the analysis sample, N=1298).
+    rhat_cols = [f"{t}__max_rhat" for t in TASKS if f"{t}__max_rhat" in td.columns]
+    n_train_conv = (
+        td.filter(pl.all_horizontal([pl.col(c) <= RHAT_MAX for c in rhat_cols])).height
+        if rhat_cols else n_train
+    )
+
     # ---- CONSORT funnel ----
     funnel = [
         ("Interacted with survey", args.n_interacted, "", "recruitment platform"),
@@ -85,6 +99,9 @@ def main() -> None:
          "missing/failed model fit for >=1 task"),
         ("Analysis-eligible cohort", n_eligible, 0, "--"),
         ("  -> Training set (exploratory)", n_train, "", "50/50 split"),
+        ("      -> Training, converged fits (max_rhat<=1.1)", n_train_conv,
+         n_train - n_train_conv,
+         "excl. any-task max_rhat>1.1 (analysis sample for CCA/XGBoost/AK)"),
         ("  -> Held-out test set", n_test, "", "50/50 split"),
     ]
     funnel_df = pl.DataFrame(
