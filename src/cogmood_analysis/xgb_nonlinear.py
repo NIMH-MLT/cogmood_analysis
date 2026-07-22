@@ -41,14 +41,13 @@ import os
 import numpy as np
 import polars as pl
 from numpy.typing import NDArray
-from scipy import stats
 from sklearn.metrics import r2_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from xgboost import XGBRegressor
 
+from cogmood_analysis import sharp
 from cogmood_analysis import shared_variance as sv
 from cogmood_analysis.anna_karenina import _bh_fdr
-from cogmood_analysis.sharp import _sharp_moments
 
 #: Demographic covariates in the null (and full) design. Squared/interaction
 #: terms are omitted - trees recover them from ``age`` and ``sex`` by splitting.
@@ -216,12 +215,11 @@ def sharp_xgb(
     """SHARP test that the full (covars+params) model beats the null (covars) model.
 
     Runs ``J`` disjoint-half repetitions (:func:`_rep_half_diff`), each yielding a
-    paired ``(D_A, D_B)`` of fold-averaged held-out ``R2_full - R2_null``. The SHARP
-    moment estimator (:func:`cogmood_analysis.sharp._sharp_moments`) gives the mean
-    gain and its fold-dependence-aware variance; the p-value is one-sided (full > null).
-
-    Returns a dict with ``mean_r2_gain`` (D_bar), ``se``, ``ci_lo``/``ci_hi`` (95%),
-    ``z``, ``p_one_sided``, ``rho``, ``sigma2``, ``J``, ``K``.
+    paired ``(D_A, D_B)`` of fold-averaged held-out ``R2_full - R2_null``. Inference
+    is the paper-faithful **null-constrained score test**
+    (:func:`cogmood_analysis.sharp.sharp_score_test`), one-sided (full > null), with a
+    test-inversion 95% CI. The raw half-statistics ``d_a``/``d_b`` are returned so the
+    inference can be recomputed without rerunning the (expensive) fits.
     """
     X_null = covars
     X_full = np.column_stack([covars, params])
@@ -238,21 +236,20 @@ def sharp_xgb(
 
     D_A = np.array([p[0] for p in pairs], dtype=float)
     D_B = np.array([p[1] for p in pairs], dtype=float)
-    D_bar, var_Dbar, sigma2, rho = _sharp_moments(D_A, D_B)
-    se = float(np.sqrt(var_Dbar)) if np.isfinite(var_Dbar) else float("nan")
-    z = D_bar / se if se and se > 1e-12 else 0.0
-    p_one_sided = float(1.0 - stats.norm.cdf(z))
+    st = sharp.sharp_score_test(D_A, D_B, mu0=0.0, alternative="greater")
+    lo, hi = sharp._invert_score_test(D_A, D_B, alpha=0.05)
     return {
-        "mean_r2_gain": D_bar,
-        "se": se,
-        "ci_lo": D_bar - 1.96 * se,
-        "ci_hi": D_bar + 1.96 * se,
-        "z": float(z),
-        "p_one_sided": p_one_sided,
-        "rho": rho,
-        "sigma2": sigma2,
-        "J": J,
-        "K": K,
+        "mean_r2_gain": st["D_bar"],
+        "ci_lo": float(lo),
+        "ci_hi": float(hi),
+        "z": st["z"],
+        "p_one_sided": st["p"],
+        "rho": st["rho"],
+        "sigma2": st["sigma2"],
+        "J": int(J),
+        "K": int(K),
+        "d_a": D_A.tolist(),
+        "d_b": D_B.tolist(),
     }
 
 

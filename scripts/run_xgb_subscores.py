@@ -12,6 +12,7 @@ for a direct comparison. Training half only; the held-out half is never read. Wr
 
 from pathlib import Path
 
+from cogmood_analysis import provenance as prov
 from cogmood_analysis import xgb_nonlinear as xg
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +28,12 @@ def main() -> None:
           f"features={data.param_cols}, {len(data.symptom_cols)} targets")
     tbl = xg.run_xgb_nonlinear(data, J=30, K=5, seed=0, n_jobs=8, verbose=True)
     tbl.write_parquet(OUT)
-    print(f"\nWrote {OUT}")
+    prov.write_sidecar(OUT, prov.provenance(
+        CSV, data.sub_ids,
+        config={"analysis": "xgb_subscores_sharp", "features": "age+sex+4subscores",
+                "J": 30, "K": 5, "inference": "score_test_one_sided", "seed": 0,
+                "xgb": xg.XGB_PARAMS}))
+    print(f"\nWrote {OUT} (+ provenance sidecar)")
     print(tbl.select(["target", "mean_r2_gain", "ci_lo", "ci_hi",
                       "p_one_sided", "q_fdr"]))
     n_sig = int((tbl["q_fdr"] < 0.05).sum())
