@@ -477,7 +477,11 @@ def fit_score_cca(
     model = rCCA(latent_dimensions=k_eff, c=[c, c])
     model.fit((ZA_tr, ZB_tr))
     sa, sb = model.transform((ZA_te, ZB_te))
-    return np.abs(_heldout_corr(np.asarray(sa), np.asarray(sb)))
+    # Signed held-out canonical correlations: a joint sign-flip of both variates
+    # preserves r, so a negative held-out r means the fitted direction did not
+    # generalize (reversed) -- evidence against association, not sign ambiguity.
+    # Do NOT take the absolute value (that folds the null and inflates the ceiling).
+    return _heldout_corr(np.asarray(sa), np.asarray(sb))
 
 
 # --- Hyperparameter tuning (inner CV on TRAIN only) -------------------------

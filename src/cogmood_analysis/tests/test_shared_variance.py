@@ -147,8 +147,9 @@ def test_fit_score_cca_shapes_and_signal():
     EB_tr, EB_te = sv.embed_view_raw(views.B[:300], views.B[300:])
     r = sv.fit_score_cca(EA_tr, EB_tr, EA_te, EB_te, n_pca=8, k=5, c=0.3)
     assert r.shape == (5,)
-    assert (r >= 0).all() and (r <= 1).all()
-    # real shared structure -> leading held-out correlation is substantial
+    # signed correlations now (no abs-folding): magnitude bounded, sign meaningful
+    assert (np.abs(r) <= 1).all()
+    # real shared structure -> leading held-out correlation is substantial & positive
     assert r[0] > 0.5
 
 

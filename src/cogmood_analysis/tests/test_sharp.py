@@ -130,7 +130,7 @@ def test_score_arm_detects_shared_structure(arm):
         cfg = sharp.ArmConfig(max_epochs=60, device="cpu")  # keep test fast/CPU
     r = sharp.score_arm(views.A[:450], views.B[:450], views.A[450:], views.B[450:],
                         arm, cfg, seed=0)
-    assert r.ndim == 1 and (r >= 0).all() and (r <= 1.0001).all()
+    assert r.ndim == 1 and (np.abs(r) <= 1.0001).all()  # signed corrs
     assert r[0] > 0.4  # real shared structure recovered on held-out data
 
 

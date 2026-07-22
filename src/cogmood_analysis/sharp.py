@@ -621,7 +621,7 @@ def score_arm(
             gamma=cfg.gamma,
         ).fit((EA_tr, EB_tr))
         sa, sb = model.transform((EA_te, EB_te))
-        return np.abs(sv._heldout_corr(np.asarray(sa), np.asarray(sb)))
+        return sv._heldout_corr(np.asarray(sa), np.asarray(sb))  # signed (see fit_score_cca)
     if arm == "deep":
         EA_tr, EA_te = sv._standardize(A_tr, A_te)
         EB_tr, EB_te = sv._standardize(B_tr, B_te)
