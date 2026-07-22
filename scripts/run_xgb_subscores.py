@@ -26,12 +26,12 @@ def main() -> None:
     data = xg.load_xgb_data(CSV, param_columns=SUBSCORES)
     print(f"Loaded N={data.covars.shape[0]} (of {data.n_total}), "
           f"features={data.param_cols}, {len(data.symptom_cols)} targets")
-    tbl = xg.run_xgb_nonlinear(data, J=30, K=5, seed=0, n_jobs=8, verbose=True)
+    tbl = xg.run_xgb_nonlinear(data, J=60, K=5, seed=0, n_jobs=8, verbose=True)
     tbl.write_parquet(OUT)
     prov.write_sidecar(OUT, prov.provenance(
         CSV, data.sub_ids,
         config={"analysis": "xgb_subscores_sharp", "features": "age+sex+4subscores",
-                "J": 30, "K": 5, "inference": "score_test_one_sided", "seed": 0,
+                "J": 60, "K": 5, "inference": "score_test_one_sided", "seed": 0,
                 "xgb": xg.XGB_PARAMS}))
     print(f"\nWrote {OUT} (+ provenance sidecar)")
     print(tbl.select(["target", "mean_r2_gain", "ci_lo", "ci_hi",

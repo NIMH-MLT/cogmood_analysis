@@ -12,6 +12,8 @@ Training half only (``data/exploratory/training_data.csv``, N=1298 after the
 
 from pathlib import Path
 
+from cogmood_analysis import provenance as prov
+
 from cogmood_analysis import xgb_nonlinear as xg
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +27,11 @@ def main() -> None:
           f"{data.params.shape[1]} params, {len(data.symptom_cols)} targets")
     tbl = xg.run_xgb_kfold(data, K=5, n_reps=20, seed=0, n_jobs=8, verbose=True)
     tbl.write_parquet(OUT)
-    print(f"\nWrote {OUT}")
+    prov.write_sidecar(OUT, prov.provenance(
+        CSV, data.sub_ids,
+        config={"analysis": "xgb_kfold_descriptive", "features": "age+sex+30params",
+                "K": 5, "n_reps": 20, "inference": "descriptive_only", "seed": 0}))
+    print(f"\nWrote {OUT} (+ provenance sidecar)")
     print(tbl.select(["target", "mean_r2_gain", "ci_lo", "ci_hi",
                       "frac_folds_positive", "max_fold_gain",
                       "mean_r2_full", "mean_r2_null"]))

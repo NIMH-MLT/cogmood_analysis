@@ -18,9 +18,10 @@ are omitted: a tree recovers them from ``age`` and ``sex`` by splitting. The two
 arms therefore differ only in whether the cognitive parameters are available, so a
 performance gain isolates their (possibly nonlinear, interactive) contribution.
 
-Inference uses the **SHARP** estimator (:func:`cogmood_analysis.sharp._sharp_moments`,
-Zeng et al. 2026) on the paired per-half performance *difference* (full - null),
-giving a valid analytic p-value under fold dependence - no permutation null needed.
+Inference uses the paper-faithful **SHARP null-constrained score test**
+(:func:`cogmood_analysis.sharp.sharp_score_test`, Zeng et al. 2026) on the paired
+per-half performance *difference* (full - null), giving a valid analytic p-value
+under fold dependence - no permutation null needed.
 The test is one-sided (full > null): we ask whether cognition *adds* predictive
 value. Both arms use the identical algorithm - fixed shallow trees with the number
 of boosting rounds tuned by early stopping on an inner validation split carved from
