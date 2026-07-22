@@ -16,3 +16,10 @@ data/survey
 # participant-level training data + regenerable result artifacts
 data/exploratory
 
+# notebook checkpoints, run logs, scratch notebooks, and the (large) SHARP preprint PDF
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+logs/
+notebooks/Untitled.ipynb
+*.pdf
+

@@ -123,7 +123,9 @@ def main() -> None:
               f"p={results['perms'][a]['p']:.4f} ({time.time() - t:.0f}s) [checkpointed]",
               flush=True)
 
-    print(f"\nSaved results -> {out}  (total {time.time() - t0:.0f}s)", flush=True)
+    prov.write_sidecar(out, results["provenance"])
+    print(f"\nSaved results -> {out}  (+ provenance sidecar) (total {time.time() - t0:.0f}s)",
+          flush=True)
 
     # console summary
     perms = results["perms"]

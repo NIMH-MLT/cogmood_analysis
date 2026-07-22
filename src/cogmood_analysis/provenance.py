@@ -52,6 +52,16 @@ def sha256_subjects(sub_ids: Sequence[str]) -> str:
     return hashlib.sha256(joined.encode()).hexdigest()
 
 
+#: Provenance record schema version (bump on breaking changes to the fields).
+SCHEMA_VERSION = "2"
+
+
+def _lockfile_sha256() -> str | None:
+    """SHA-256 of the repo's ``uv.lock`` (environment pin), if present."""
+    lock = Path(__file__).resolve().parents[2] / "uv.lock"
+    return sha256_file(lock) if lock.exists() else None
+
+
 def provenance(
     training_csv: str | Path,
     sub_ids: Sequence[str],
@@ -60,24 +70,30 @@ def provenance(
 ) -> dict[str, Any]:
     """Build a provenance record for an artifact.
 
-    Captures the source commit + dirty flag, the ``training_data.csv`` SHA-256,
-    the subject-set SHA-256 (hash of the sorted ``sub_ids`` actually analyzed), the
-    run ``config``, and a UTC timestamp.
+    Captures the source commit + dirty flag, the ``training_data.csv`` SHA-256, the
+    subject-set SHA-256 (hash of the sorted ``sub_ids``), the run ``config``, a UTC
+    timestamp, the schema version, and the environment lockfile (``uv.lock``) hash.
+    The artifact's own SHA-256 is added by :func:`write_sidecar` after the file is
+    written.
     """
     return {
+        "schema_version": SCHEMA_VERSION,
         "source_commit": git_commit(),
         "dirty": git_dirty(),
         "training_csv_sha256": sha256_file(training_csv),
         "subject_set_sha256": sha256_subjects(sub_ids),
         "n_subjects": len(sub_ids),
         "config": config,
+        "env_lockfile_sha256": _lockfile_sha256(),
         "created_at": created_at or datetime.now(timezone.utc).isoformat(),
     }
 
 
 def write_sidecar(artifact_path: str | Path, prov: dict[str, Any]) -> Path:
-    """Write ``<artifact>.provenance.json`` next to an artifact; return its path."""
+    """Write ``<artifact>.provenance.json`` (incl. the artifact's own SHA-256)."""
     p = Path(artifact_path)
+    rec = dict(prov)
+    rec["artifact_sha256"] = sha256_file(p) if p.exists() else None
     side = p.with_suffix(p.suffix + ".provenance.json")
-    side.write_text(json.dumps(prov, indent=2, default=str))
+    side.write_text(json.dumps(rec, indent=2, default=str))
     return side
