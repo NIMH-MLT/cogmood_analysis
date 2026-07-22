@@ -160,7 +160,7 @@ cells.append(nbf.v4.new_code_cell(
 ))
 
 cells.append(nbf.v4.new_markdown_cell(
-    "Same null. 19/20 targets negative, only `hitop_welbe` a hair positive (+0.0002, one-sided "
+    "Same null. 19/20 targets negative, only `hitop_welbe` a hair positive (+0.0004, one-sided "
     "score-test p≈0.16); "
     "no target survives FDR. Fewer, cleaner features make the gaps slightly less negative and the "
     "SHARP CIs tighter, but nothing crosses into a real positive gain. The result is robust across "
