@@ -76,7 +76,14 @@ def load_ak_data(
     training_csv: str | os.PathLike,
     symptom_cols: Sequence[str] | None = None,
 ) -> AKData:
-    """Load the deviation matrix and symptom scores, aligned by ``sub_id``."""
+    """Load the deviation matrix and symptom scores, aligned by ``sub_id``.
+
+    The analysis sample is defined by the deviation pickle, which
+    ``scripts/build_normative_deviations.py`` builds with the same subject
+    exclusion as the CCA / XGBoost analyses (any-task ``max_rhat > 1.1`` dropped,
+    N=1298). The normative model behind those deviations is likewise fit only on
+    the retained (rhat-passing) HV subjects.
+    """
     dev = pickle.loads(Path(deviations_pkl).read_bytes())
     df = pl.read_csv(training_csv, infer_schema_length=20000)
     scols = [c for c in (symptom_cols or sv.VIEW_B_COLUMNS) if c in df.columns]
