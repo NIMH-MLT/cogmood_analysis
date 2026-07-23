@@ -23,18 +23,22 @@ def main() -> None:
     lock = prov._lockfile_sha256()
     for side in sorted(EXP.glob("*.provenance.json")):
         artifact = EXP / side.name[: -len(".provenance.json")]
-        if ".r1." in artifact.name:            # preserve round-1 backups verbatim
-            continue
+        if ".r1." in artifact.name or ".r2." in artifact.name:
+            continue                            # preserve round-1/round-2 backups verbatim
         rec = json.loads(side.read_text())
         rec["schema_version"] = prov.SCHEMA_VERSION
-        rec["source_commit"] = commit
+        # preserve the analysis (run-time) commit; refresh only the stamp commit
+        rec["analysis_source_commit"] = (
+            rec.get("analysis_source_commit") or rec.pop("source_commit", None))
+        rec["provenance_stamp_commit"] = commit
+        rec.pop("source_commit", None)
         rec["dirty"] = dirty
         rec["env_lockfile_sha256"] = lock
         rec["artifact_sha256"] = prov.sha256_file(artifact) if artifact.exists() else None
         rec["restamped"] = True
         side.write_text(json.dumps(rec, indent=2, default=str))
-        print(f"{artifact.name:44s} commit={str(commit)[:9]} dirty={dirty} "
-              f"sha={str(rec['artifact_sha256'])[:12]}")
+        print(f"{artifact.name:44s} analysis={str(rec['analysis_source_commit'])[:9]} "
+              f"stamp={str(commit)[:9]} dirty={dirty} sha={str(rec['artifact_sha256'])[:12]}")
 
 
 if __name__ == "__main__":
