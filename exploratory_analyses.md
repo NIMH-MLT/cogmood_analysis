@@ -82,10 +82,14 @@ in-context). A disjointness test asserts this.
   two **disjoint** stratified halves; K-fold CV is run within each half; fold statistics
   (leading held-out **signed** canonical correlation) are averaged to one value per half
   → a pair `(D_Aj, D_Bj)` independent within the repetition.
-- **Inference: null-constrained score test** with a **global** (multimodal-safe, grid +
-  refine) profile optimizer for `(σ², ρ)`, and **test-inversion** 95% CIs. Correlations
-  are **signed** (a negative held-out r means the fitted direction did not generalize; it
-  is *not* folded to |r|). The earlier method-of-moments + Wald test (which inflated the
+- **Inference: null-constrained score test** with a **global, boundary-aware** profile
+  optimizer for `(σ², ρ)` — it brackets every stationary point of the *analytic* profile
+  derivative on a boundary-clustered (cosine) grid, refines each with Brent to ~machine
+  precision, and evaluates the positive-definiteness boundaries explicitly (the profiled
+  likelihood is multimodal with narrow near-boundary modes; verified 0 misses in 2,000
+  trials vs a dense brute force) — and **test-inversion** 95% CIs. Correlations are
+  **signed** (a negative held-out r means the fitted direction did not generalize; it is
+  *not* folded to |r|). The earlier method-of-moments + Wald test (which inflated the
   false-positive rate) is retained only as a calibration reference.
 - **Above-chance permutation null (corroborating):** within-strata label permutation, run
   at a coarser `J_perm=5, K_perm=3`; **n_perm** = raw/kernel 1000, deep 200, fm/tabfm 100.
@@ -241,10 +245,12 @@ data?
 ## 7. Inference validity, provenance, and limitations
 
 - **SHARP inference** uses the paper's null-constrained **score test** (not method-of-
-  moments + Wald, which inflates the FPR) with a **global** profile optimizer (the profiled
-  likelihood is multimodal; a single bounded minimize could pick a non-global mode) and
-  **test-inversion** CIs. Validated by null simulations: valid FPR control (conservative
-  at low/moderate ρ), a power check, and ~95% CI coverage.
+  moments + Wald, which inflates the FPR) with a **global, boundary-aware** profile
+  optimizer (the profiled likelihood is multimodal; a plain bounded minimize could pick a
+  non-global mode — the optimizer instead root-brackets the analytic derivative and checks
+  the boundaries) and **test-inversion** CIs. Validated by null simulations: valid FPR
+  control (conservative at low/moderate ρ), a power check, ~95% CI coverage, and a
+  0-miss globality check vs a dense brute force.
 - **Conservatism / power:** at J=60 the score test is still somewhat conservative at
   low/moderate ρ, so the null results reflect limited power, not proof of absence.
 - **Excluded arms:** the jointly fine-tuned FM arms are not made leakage-free (infeasible
@@ -253,6 +259,9 @@ data?
 - **Provenance:** every regenerated artifact has a `*.provenance.json` sidecar
   (schema v3: `analysis_source_commit` + `provenance_stamp_commit`, `training_data.csv` +
   subject-set + artifact + `uv.lock` SHA-256, config, `dirty=false`); see `ARTIFACTS.md`.
-  Prior artifacts preserved as `*.r1.*` (pre-round-2) and `*.r2.*` (pre-round-3-recompute).
+  Prior artifacts preserved as `*.r1.*` (pre-round-2) and `*.r2.*` (pre-round-3-recompute);
+  the regeneration/recompute scripts also make content-addressed, never-clobbering backups
+  (`<name>.bak-<sha12>.<ext>` via `provenance.backup_artifact`), so rerunning them is
+  idempotent and cannot overwrite a historical copy.
 - **Reproducibility:** all analyses are training-half only; artifacts are reproducible from
   the recorded commit + `uv.lock` via the `scripts/run_*.py` runners.
