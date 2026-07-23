@@ -167,8 +167,9 @@ standardized symptom scores), each in **raw** and **age/sex-residualized** varia
 
 **Findings (N=1298):**
 - **Pre-specified primary** (max|z| → PC1-resid): r = −0.002, **p = 0.54 (null)**.
-- **Elastic-net:** null across every target (0 BH survivors; OOF R² ≤ ~0.006, ~0 features
-  selected). Earlier floor-p "hits" were an artifact of selecting hyperparameters on the
+- **Elastic-net:** null across every target (0 BH survivors; OOF R² ≤ ~0.006; **sparse**
+  selection — median 1, mean ~2.3, up to 10 of 30 features across targets). Earlier floor-p
+  "hits" were an artifact of selecting hyperparameters on the
   full outcome and an OOF-R² null below zero — they disappear under the nested pipeline.
 - **Family-wise maxT:** **0 of 105 survive** (strongest `count_gt2 → hitop_hypsom`,
   adj_p ≈ 0.08).
@@ -249,8 +250,9 @@ data?
 - **Excluded arms:** the jointly fine-tuned FM arms are not made leakage-free (infeasible
   nested cross-fit of fine-tuning); conclusions are limited to the frozen-FM and non-FM
   arms.
-- **Provenance:** every regenerated artifact has a `*.provenance.json` sidecar (source
-  commit, `training_data.csv` + subject-set + artifact + `uv.lock` SHA-256, config,
-  schema v2, `dirty=false`); see `ARTIFACTS.md`. Round-1 artifacts preserved as `*.r1.*`.
+- **Provenance:** every regenerated artifact has a `*.provenance.json` sidecar
+  (schema v3: `analysis_source_commit` + `provenance_stamp_commit`, `training_data.csv` +
+  subject-set + artifact + `uv.lock` SHA-256, config, `dirty=false`); see `ARTIFACTS.md`.
+  Prior artifacts preserved as `*.r1.*` (pre-round-2) and `*.r2.*` (pre-round-3-recompute).
 - **Reproducibility:** all analyses are training-half only; artifacts are reproducible from
   the recorded commit + `uv.lock` via the `scripts/run_*.py` runners.
