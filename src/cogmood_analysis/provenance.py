@@ -32,8 +32,11 @@ def git_commit() -> str | None:
 
 
 def git_dirty() -> bool | None:
-    """True if the working tree has uncommitted changes (None if unknown)."""
-    status = _run_git(["status", "--porcelain"])
+    """True if the working tree has uncommitted **analysis-code** changes (None if
+    unknown). Submodules are ignored (the repo's ``packages/Supreme`` pointer is
+    unrelated to the analyses) and gitignored files (data artifacts, logs,
+    checkpoints) are excluded by ``--porcelain`` already."""
+    status = _run_git(["status", "--porcelain", "--ignore-submodules=all"])
     return None if status is None else bool(status)
 
 
