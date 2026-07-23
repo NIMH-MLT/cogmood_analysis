@@ -2,10 +2,11 @@
 normative deviations, so they stay in sync with ak_results.parquet and the notebook.
 
 The notebook computes maxT inline (source of truth); these files exist for anyone loading
-the canonical filenames. Stale pre-cross-fit copies (2026-07-17) are preserved as *.r1.*.
-Cheap (permutation on the deviation matrix; no model refit). Training half only.
+the canonical filenames. Before overwriting, the current files get a content-addressed,
+never-clobbering backup (``provenance.backup_artifact``); the stale pre-cross-fit copies
+(2026-07-17) remain preserved as ``*.r1.*``. Cheap (permutation on the deviation matrix; no
+model refit). Training half only.
 """
-import shutil
 from pathlib import Path
 
 import polars as pl
@@ -32,8 +33,7 @@ def main() -> None:
 
     for name, tbl in (("ak_maxstat.parquet", joint), ("ak_within_maxT.parquet", within)):
         out = EXP / name
-        if out.exists() and not (EXP / name.replace(".parquet", ".r1.parquet")).exists():
-            shutil.copy2(out, EXP / name.replace(".parquet", ".r1.parquet"))  # preserve stale
+        prov.backup_artifact(out)     # content-addressed, never clobbers history (incl. stale .r1)
         tbl.write_parquet(out)
         prov.write_sidecar(out, provenance)
 
