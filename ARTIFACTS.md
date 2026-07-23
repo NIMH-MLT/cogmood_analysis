@@ -37,6 +37,10 @@ underlying `D_A`/`D_B` come from the J=60 round-2 fits.
 
 Preserved backups (gitignored, each with a sidecar): `*.r1.*` = pre-round-2 copies
 (`*-fix-r1` tags), `*.r2.*` = pre-round-3-recompute copies (`*-fix-r2` tags), for comparison.
+These fixed-name backups were created manually and are historical/immutable; the
+regeneration scripts now make **content-addressed** backups (`<name>.bak-<sha12>.<ext>` via
+`provenance.backup_artifact`) that never clobber an existing backup, so rerunning the
+reproduction commands is idempotent and cannot overwrite a genuine historical copy.
 
 Reproduce from the recorded commit + `uv.lock`:
 ```
