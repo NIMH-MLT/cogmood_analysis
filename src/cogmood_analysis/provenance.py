@@ -32,11 +32,13 @@ def git_commit() -> str | None:
 
 
 def git_dirty() -> bool | None:
-    """True if the working tree has uncommitted **analysis-code** changes (None if
-    unknown). Submodules are ignored (the repo's ``packages/Supreme`` pointer is
-    unrelated to the analyses) and gitignored files (data artifacts, logs,
-    checkpoints) are excluded by ``--porcelain`` already."""
-    status = _run_git(["status", "--porcelain", "--ignore-submodules=all"])
+    """True if the working tree has uncommitted modifications to **tracked
+    analysis-code** files (None if unknown). Submodules are ignored (the repo's
+    ``packages/Supreme`` pointer is unrelated) and untracked files are excluded
+    (``--untracked-files=no``) so gitignored data/logs and transient NFS lock files
+    (``.nfs*``) do not spuriously flag the tree dirty."""
+    status = _run_git(["status", "--porcelain", "--ignore-submodules=all",
+                       "--untracked-files=no"])
     return None if status is None else bool(status)
 
 
