@@ -37,7 +37,21 @@ def main() -> None:
     )
     prov.write_sidecar(OUT, provenance)
     print(f"\nWrote {OUT} ({tbl.height} rows) + provenance sidecar "
-          f"(commit={str(provenance['source_commit'])[:9]} dirty={provenance['dirty']})")
+          f"(commit={str(provenance['analysis_source_commit'])[:9]} dirty={provenance['dirty']})")
+
+    # canonical family-wise maxT artifacts (kept in sync with ak_results); the notebook
+    # recomputes maxT inline as the source of truth. See scripts/regen_ak_maxt.py.
+    resid = [t for t in ak.symptom_targets(data) if t.variant == "resid"]
+    joint, _ = ak.maxstat_correction(data.absz, resid, n_perm=10000, seed=0)
+    within = ak.maxstat_within_approach(data.absz, resid, n_perm=10000, seed=0)
+    maxt_prov = prov.provenance(CSV, data.sub_ids, config={
+        "analysis": "ak_maxT", "n_perm": 10000, "seed": 0,
+        "procedure": "westfall_young_stepdown_maxT"})
+    for name, mt in (("ak_maxstat.parquet", joint), ("ak_within_maxT.parquet", within)):
+        mt.write_parquet(OUT.parent / name)
+        prov.write_sidecar(OUT.parent / name, maxt_prov)
+    print(f"Wrote ak_maxstat + ak_within_maxT (joint survivors<0.05: "
+          f"{joint.filter(pl.col('adj_p_maxT') < 0.05).height})")
 
     primary = tbl.filter(
         (pl.col("target") == "PC1")
