@@ -38,10 +38,11 @@ def main() -> None:
         prov.write_sidecar(out, provenance)
 
     top = joint.sort("adj_p_maxT").head(1).row(0, named=True)
+    wsig = within.filter(pl.col("within_maxT") < 0.05).height
     print(f"wrote ak_maxstat + ak_within_maxT ({N_PERM} perms) | "
           f"joint survivors<0.05: {joint.filter(pl.col('adj_p_maxT') < 0.05).height} | "
-          f"top {top['approach']}->{top['target']} adj_p={top['adj_p_maxT']:.4f} "
-          f"within={top['within_maxT']:.4f}")
+          f"within survivors<0.05: {wsig} | "
+          f"top(joint) {top['approach']}->{top['target']} adj_p={top['adj_p_maxT']:.4f}")
 
 
 if __name__ == "__main__":
