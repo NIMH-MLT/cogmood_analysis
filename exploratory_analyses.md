@@ -26,7 +26,8 @@ tested as a *shared axis* (CCA), a *nonlinear predictive* signal (XGBoost), or
   convergence exclusion**: drop any subject with `{task}__max_rhat > 1.1` on any task
   (1399 → 1298). This identical cohort (subject-set SHA-256 `7c7f63c4…`) is used by the
   CCA, Anna Karenina, and XGBoost analyses.
-- **Covariates:** `age`, `sex` (and `age²`, interactions where a linear model needs them).
+- **Covariates:** `age` and `sex`; the normative and symptom-residualization models also
+  include `age²`.
 - **Stratification variable:** `backfilled_prolific_screen_group` (recruitment group).
 - `training_data.csv` SHA-256 `e86542ef…7184f80` (matches the audited input).
 
@@ -35,8 +36,8 @@ tested as a *shared axis* (CCA), a *nonlinear predictive* signal (XGBoost), or
 ## 1. Participant exclusion funnel (CONSORT)  — `scripts/exclusion_table.py` (branch `exclusion-table`)
 
 - **Design:** reconstruct recruitment → analysis-eligible cohort from `data_quality.csv`,
-  survey responses, and per-task fit files. Behavioral criterion `good10` (>10%
-  non-response/RT-outlier tolerated).
+  survey responses, and per-task fit files. Behavioral criterion `good10` tolerates up to
+  10% non-response/RT-outliers; subjects above 10% fail that task's criterion.
 - **Funnel:** interacted 4987 → provided survey response 4068 → completed all 4 tasks
   3614 → passed behavioral QC (good10) 3023 → successful model fits (all 4 tasks) 2809 →
   50/50 split: **training 1399 / held-out 1410** → training with converged fits
@@ -64,7 +65,8 @@ test whether added model flexibility raises it.
 - `tabfm` — frozen **Google TabFM** embeddings + linear CCA.
 - **Excluded:** the jointly fine-tuned arms `fm_deep`/`tabfm_deep` are dropped from the
   comparison — a leakage-free version requires nested cross-fit of the fine-tuning itself
-  (infeasible), and they did not beat linear in earlier runs.
+  and was computationally infeasible here. Results from earlier non-cross-fitted runs are
+  not used as evidence because their support/query leakage invalidates the comparison.
 
 **Key hyperparameters.** rCCA/KCCA: latent dims `k=5`, ridge `c=0.9`; PCA before linear
 CCA `n_pca=10` for `raw`, `n_pca=5` for the FM arms (`fm`/`tabfm`). FM pseudo-target =
@@ -82,12 +84,14 @@ in-context). A disjointness test asserts this.
   two **disjoint** stratified halves; K-fold CV is run within each half; fold statistics
   (leading held-out **signed** canonical correlation) are averaged to one value per half
   → a pair `(D_Aj, D_Bj)` independent within the repetition.
-- **Inference: null-constrained score test** with a **global, boundary-aware** profile
-  optimizer for `(σ², ρ)` — it brackets every stationary point of the *analytic* profile
-  derivative on a boundary-clustered (cosine) grid, refines each with Brent to ~machine
-  precision, and evaluates the positive-definiteness boundaries explicitly (the profiled
-  likelihood is multimodal with narrow near-boundary modes; verified 0 misses in 2,000
-  trials vs a dense brute force) — and **test-inversion** 95% CIs. Correlations are
+- **Inference: null-constrained score test** with a **boundary-aware derivative-bracketing**
+  profile optimizer for `(σ², ρ)` — it brackets detected sign changes of the *analytic*
+  profile derivative on boundary-clustered (cosine) grids, refines them with Brent, and
+  checks points close to both positive-definiteness boundaries. This fixed-grid procedure
+  matched exact stationary-root solutions for all saved analysis profiles and the tested
+  paper-model simulations, but is not a mathematical guarantee of the global optimum for
+  arbitrary, especially near-singular, inputs. Inference uses **test-inversion** 95% CIs.
+  Correlations are
   **signed** (a negative held-out r means the fitted direction did not generalize; it is
   *not* folded to |r|). The earlier method-of-moments + Wald test (which inflated the
   false-positive rate) is retained only as a calibration reference.
@@ -104,12 +108,12 @@ in-context). A disjointness test asserts this.
   - `fm`    r = **−0.006**, CI [−0.045, +0.033], r² ≈ 0, p_perm = 0.347  (null even leakage-free)
   - `tabfm` r = +0.059, CI [+0.001, +0.118], r² = 0.004, p_perm = 0.020
 - **No flexible arm beats linear `raw`.** Pairwise SHARP vs raw: kernel p=0.93, deep
-  p=0.041, fm p=0.016, tabfm p=0.35 — and the significant contrasts are in the direction
-  of **raw being better** (the flexible arm is worse). **Nothing survives BH-FDR** across
-  the 10 pairwise comparisons (min q ≈ 0.08).
+  p=0.041, fm p=0.016, tabfm p=0.35 — and the two nominally significant contrasts are in
+  the direction of **raw being better** (the flexible arm is worse). **Nothing survives
+  BH-FDR** across the 10 pairwise comparisons (min q ≈ 0.08).
 - **Bottom line:** the generalizable shared axis is small (~0.7–0.8% leading-dimension
-  shared variance, essentially linear); kernel ≈ raw; foundation-model embeddings do not
-  help.
+  shared variance); among the evaluated pipelines, the linear `raw` arm captures it at
+  least as well as the kernel, deep, or foundation-model arms.
 
 ---
 
@@ -125,8 +129,8 @@ subject's deviation (prerequisite for the Anna Karenina test).
   subject-level max_rhat filter). ~97.9% of subject×param cells usable.
 - **Transforms:** CAB parameters (10, LogNormal priors) → log; the other 20 → Yeo-Johnson
   (fit on HV). Transformed values are clipped to the fitted reference range to guard
-  extrapolation; **clipping quantified as negligible** (mean ~0.08%, max ~0.74% of subjects
-  on any parameter).
+  extrapolation; among QC-good HV subjects under out-of-fold scoring, **clipping was
+  negligible** (mean ~0.08%, maximum ~0.74% for any parameter).
 - **Model:** covariate-adjusted mean (design `[1, a, a², sex]`) and residual SD; deviation
   `z`, centile, and extremeness indicator (`|z| > 2`).
 - **HV cross-fitting:** HV subjects receive **out-of-fold** deviations (5-fold within HV;
@@ -152,7 +156,8 @@ a random sign under the hypothesis.
 **Symptom targets (21).** 20 View-B scores + a **PC1 general factor** (first PC of the
 standardized symptom scores), each in **raw** and **age/sex-residualized** variants.
 `hitop_welbe` (positive valence) is sign-flipped so higher = more pathology.
-**Pre-specified primary:** `max|z|` × **PC1-residualized** (one test).
+**Designated primary for this exploratory analysis:** `max|z|` × **PC1-residualized**
+(one test).
 
 **Approaches.**
 - Unsupervised (from |z|): `max_abs`, `top3_mean`, `top5_mean`, `count_gt2` (# |z|>2),
@@ -165,12 +170,13 @@ standardized symptom scores), each in **raw** and **age/sex-residualized** varia
     **inside each outer fold**. Permutation null: **200** permutations rerunning the full
     pipeline.
 - Multiple comparisons: BH-FDR within the secondary set per approach; plus a family-wise
-  **Westfall–Young step-down maxT** (10,000 shared permutations) over the joint
-  **5 unsupervised approaches × 21 targets** family (elastic-net is *not* in the maxT
-  family) and a per-approach `within_maxT`.
+  one-sided **Westfall–Young step-down maxT** (10,000 shared permutations) over the joint
+  **5 unsupervised approaches × 21 residualized targets** family (raw targets and
+  elastic-net are *not* in the maxT family), plus a residualized-target
+  per-approach `within_maxT`.
 
 **Findings (N=1298):**
-- **Pre-specified primary** (max|z| → PC1-resid): r = −0.002, **p = 0.54 (null)**.
+- **Designated primary** (max|z| → PC1-resid): r = −0.002, **p = 0.54 (null)**.
 - **Elastic-net:** null across every target (0 BH survivors; OOF R² ≤ ~0.006; **sparse**
   selection — median 1, mean ~2.3, up to 10 of 30 features across targets). Earlier floor-p
   "hits" were an artifact of selecting hyperparameters on the
@@ -179,9 +185,12 @@ standardized symptom scores), each in **raw** and **age/sex-residualized** varia
   adj_p ≈ 0.08).
 - **BH-FDR:** a single secondary survivor — the unsupervised **`count_gt2 → hitop_hypsom`
   (raw), r = 0.10, q = 0.02** (cognitive-abnormality burden ↔ hyposomnia / reduced sleep
-  need). Its residualized form is not significant and it does not survive maxT. This is
-  disclosed, not overclaimed.
-- **Bottom line:** the AK hypothesis is **not supported** — prespecified and joint-maxT
+  need). The corresponding residualized cell has p = 0.005 and BH q = 0.105; it does not
+  survive the joint maxT family (adj_p = 0.077), although it does survive the narrower
+  within-approach maxT family (p = 0.038). The raw cell itself was not included in either
+  residualized-target maxT family. This family-dependent result is disclosed, not
+  overclaimed.
+- **Bottom line:** the AK hypothesis is **not supported** — the designated primary and joint maxT
   tests are null; one weak, family-dependent per-approach lead remains.
 
 ---
@@ -203,8 +212,9 @@ data?
   `tree_method="hist"`; number of trees tuned by **early stopping** (cap 2000,
   `early_stopping_rounds=30`) on an inner validation split carved from each training fold.
 - **Metric & inference:** held-out **R²** per fold; per-half statistic = fold-averaged
-  `R²_full − R²_null`; **SHARP one-sided score test** (full > null) with the global
-  optimizer + test-inversion CI. **J = 60, K = 5.** Raw `D_A`/`D_B` half-statistics are
+  `R²_full − R²_null`; **SHARP one-sided score test** (full > null) with the
+  boundary-aware optimizer + test-inversion CI. **J = 60, K = 5.** Raw `D_A`/`D_B`
+  half-statistics are
   retained in the artifact. No permutation null needed (analytic score test). BH-FDR
   across the 20 survey scores.
 - **Cross-check (descriptive, no SHARP):** full-sample repeated **5-fold** (`n_reps=20`)
@@ -216,7 +226,8 @@ data?
   **0/20 survive BH-FDR**; min one-sided p = 0.83 (e.g. `hitop_hypsom` p = 0.85).
 - **4 task-summary-score features:** same null (19/20 negative; 0/20 survive FDR).
 - **Full-sample K-fold cross-check:** more data only shrinks the gaps toward zero — 3/20
-  targets tip marginally positive (max +0.006 R²), none distinguishable from noise.
+  targets tip marginally positive (max +0.006 R²), and every descriptive fold-percentile
+  range spans zero. No formal inferential test was applied to this cross-check.
 - **Bottom line:** no incremental predictive gain for these features with this XGBoost
   pipeline — robust across feature representations (30 params vs 4 scores) and evaluation
   schemes (SHARP split-half vs full-sample K-fold). Scoped claim, not a model-agnostic
@@ -230,12 +241,13 @@ data?
   deviation* (Anna Karenina), and *nonlinear prediction* (XGBoost) — the fitted cognitive
   task parameters carry **very little recoverable information about symptom scores** in the
   training half.
-- The only shared structure is a **small, essentially linear** leading canonical
-  correlation (~0.7–0.8% shared variance) that no kernel/deep/foundation-model arm
-  improves on.
+- The only detected shared structure is a **small leading canonical correlation**
+  (~0.7–0.8% shared variance); no evaluated kernel/deep/foundation-model arm improves on
+  the linear baseline.
 - The lone flagged signal is a weak, family-dependent **`count_gt2 → hitop_hypsom`** (AK,
-  q≈0.02, but not surviving family-wise maxT) — disclosed as exploratory, not a confirmed
-  effect.
+  raw-target BH q≈0.02). Its residualized counterpart does not survive the joint maxT
+  family, while the raw cell was outside that maxT family — disclosed as exploratory, not
+  a confirmed effect.
 - **Recommendation:** the training-half exploratory results are null / borderline-at-best,
   so spending the reserved held-out half on a confirmatory test is not warranted on this
   evidence.
@@ -245,23 +257,34 @@ data?
 ## 7. Inference validity, provenance, and limitations
 
 - **SHARP inference** uses the paper's null-constrained **score test** (not method-of-
-  moments + Wald, which inflates the FPR) with a **global, boundary-aware** profile
-  optimizer (the profiled likelihood is multimodal; a plain bounded minimize could pick a
-  non-global mode — the optimizer instead root-brackets the analytic derivative and checks
-  the boundaries) and **test-inversion** CIs. Validated by null simulations: valid FPR
-  control (conservative at low/moderate ρ), a power check, ~95% CI coverage, and a
-  0-miss globality check vs a dense brute force.
+  moments + Wald, which inflates the FPR) with a **boundary-aware,
+  derivative-bracketing** profile optimizer (the profiled likelihood is multimodal; a
+  plain bounded minimize can select a non-global mode) and **test-inversion** CIs. Under
+  simulations from the assumed SHARP covariance model, tests show controlled FPR
+  (conservative at low/moderate ρ), power under alternatives, and approximately 95% CI
+  coverage. The optimizer matched exact stationary-root solutions for every saved profile
+  and the tested paper-model simulations, but its fixed grids do not provide a universal
+  globality guarantee for arbitrary near-singular inputs.
 - **Conservatism / power:** at J=60 the score test is still somewhat conservative at
   low/moderate ρ, so the null results reflect limited power, not proof of absence.
 - **Excluded arms:** the jointly fine-tuned FM arms are not made leakage-free (infeasible
   nested cross-fit of fine-tuning); conclusions are limited to the frozen-FM and non-FM
   arms.
-- **Provenance:** every regenerated artifact has a `*.provenance.json` sidecar
+- **Provenance:** every active regenerated artifact listed in `ARTIFACTS.md` has a
+  `*.provenance.json` sidecar
   (schema v3: `analysis_source_commit` + `provenance_stamp_commit`, `training_data.csv` +
   subject-set + artifact + `uv.lock` SHA-256, config, `dirty=false`); see `ARTIFACTS.md`.
   Prior artifacts preserved as `*.r1.*` (pre-round-2) and `*.r2.*` (pre-round-3-recompute);
-  the regeneration/recompute scripts also make content-addressed, never-clobbering backups
-  (`<name>.bak-<sha12>.<ext>` via `provenance.backup_artifact`), so rerunning them is
-  idempotent and cannot overwrite a historical copy.
-- **Reproducibility:** all analyses are training-half only; artifacts are reproducible from
-  the recorded commit + `uv.lock` via the `scripts/run_*.py` runners.
+  the dedicated recompute utilities make content-addressed backups
+  (`<name>.bak-<sha12>.<ext>` via `provenance.backup_artifact`) and never overwrite an
+  existing backup. The primary `scripts/run_*.py` runners overwrite their canonical
+  outputs, however, and provenance timestamps change between runs, so reruns are not
+  byte-for-byte idempotent; archive a canonical artifact before rerunning a primary
+  runner when its current contents must be retained.
+- **Reproducibility:** all analyses are training-half only. Reproduction requires the
+  recorded code, `uv.lock`, the gitignored training input matching its recorded hash, and
+  the same pretrained-model snapshots. TabFM is currently selected by repository name
+  without a pinned model revision, so exact future reproduction of that arm additionally
+  requires pinning or retaining the downloaded snapshot. Recorded source commits should
+  also be kept reachable by a branch or tag rather than relying only on an unreferenced
+  object hash.
