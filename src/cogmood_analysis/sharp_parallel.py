@@ -149,7 +149,7 @@ def _perm_task(payload: tuple) -> float:
     cfg = replace(cfg, device="cuda")
     res = sharp.sharp_eval(v, arms=[arm], J=J, K=K, configs={arm: cfg},
                            dim=dim, seed=base_seed, verbose=False)
-    return sharp._sharp_moments(res.D_A[arm], res.D_B[arm])[0]
+    return sharp._legacy_mom_estimate(res.D_A[arm], res.D_B[arm])[0]
 
 
 def sharp_permutation_null_parallel(
@@ -183,7 +183,7 @@ def sharp_permutation_null_parallel(
         views, arms=[arm], J=J, K=K, configs={arm: replace(config, device="cuda")},
         dim=dim, seed=seed, verbose=False,
     )
-    obs = sharp._sharp_moments(obs_res.D_A[arm], obs_res.D_B[arm])[0]
+    obs = sharp._legacy_mom_estimate(obs_res.D_A[arm], obs_res.D_B[arm])[0]
 
     payloads = [
         (views.A, views.B, views.strata, views.a_columns, views.b_columns,

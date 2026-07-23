@@ -43,7 +43,7 @@ the mean fixed at ``mu0`` (null-constrained MLE, ``_null_constrained_mle``), the
 ``Z = (D_bar - mu0) / sqrt(Var(D_bar; sigma0^2, rho0))``. Confidence intervals are
 built by **test inversion** (the set of ``mu0`` with ``p >= alpha``,
 ``_invert_score_test``), matching the paper. The earlier method-of-moments + Wald
-path (``_sharp_moments``) is retained only as a reference for the calibration test
+path (``_legacy_mom_estimate``) is retained only as a reference for the calibration test
 - it inflates the false-positive rate and must not be used for reported inference.
 
 Because comparisons must be paired, :func:`sharp_eval` runs *all* arms on the
@@ -757,16 +757,19 @@ def _eval_one_rep(
 # negative. Var(D_bar) = sigma^2 lambda1 / (2J) = sigma^2 (1/(2J) + (J-1)/J rho).
 
 
-def _sharp_moments(
+def _legacy_mom_estimate(
     D_A: NDArray[np.float64], D_B: NDArray[np.float64]
 ) -> tuple[float, float, float, float]:
-    """Method-of-moments estimate (paper S7.3) -- REFERENCE ONLY.
+    """LEGACY method-of-moments estimate -- NOT the paper's estimator; REFERENCE ONLY.
 
-    Retained so the calibration test can demonstrate its false-positive
-    inflation; reported inference uses :func:`sharp_score_test`. ``sigma^2`` from
-    within-pair differences (``E[(D_Aj-D_Bj)^2]=2 sigma^2``); ``rho`` from the
-    centred variance of the pair means; both mean-free, ``rho`` clipped to
-    ``[0, .499]`` (part of why it miscalibrates).
+    ``sigma^2`` from within-pair differences (``E[(D_Aj-D_Bj)^2]=2 sigma^2``); ``rho``
+    from the centred variance of the pair means (``rho = 0.5 - Var(s_j)/sigma^2``,
+    clipped to ``[0, .499]``). This is a legacy pair-mean-variance estimator, **not**
+    the paper's S7.15 difference-/arm-variance estimator, and it inflates the
+    false-positive rate. Retained ONLY (a) as the reference the calibration test shows
+    to miscalibrate, and (b) to return ``D_bar`` (element ``[0]``, the correct grand
+    mean) for the permutation-null observed statistic. Reported inference uses the
+    score test (:func:`sharp_score_test`).
     """
     mask = ~(np.isnan(D_A) | np.isnan(D_B))
     a, b = D_A[mask], D_B[mask]
@@ -810,50 +813,84 @@ def _neg2ll_grid(rho, s0sq: float, Su2: float, Sv2: float, J: int):
     return 2 * J * np.log(np.maximum(q, 1e-300)) + np.log(lam1) + (J - 1) * np.log(lam2)
 
 
+def _profile_derivative(rho, s0sq: float, Su2: float, Sv2: float, J: int):
+    """Analytic d/drho of the profiled objective ``2J log(qform) + log|R|`` (vectorized).
+
+    With A=s0sq, B=Su2-s0sq, C=Sv2, lam1=1+2rho(J-1), lam2=1-2rho:
+    q = A/lam1 + B/lam2 + C;  q' = -2(J-1)A/lam1^2 + 2B/lam2^2;
+    f' = 2J q'/q + 2(J-1)/lam1 - 2(J-1)/lam2.
+    """
+    rho = np.asarray(rho, float)
+    A, B = s0sq, Su2 - s0sq
+    lam1 = 1.0 + 2.0 * rho * (J - 1)
+    lam2 = 1.0 - 2.0 * rho
+    q = A / lam1 + B / lam2 + Sv2
+    qp = -2.0 * (J - 1) * A / lam1**2 + 2.0 * B / lam2**2
+    return 2 * J * qp / np.maximum(q, 1e-300) + 2 * (J - 1) / lam1 - 2 * (J - 1) / lam2
+
+
+def _cosine_grid(lo: float, hi: float, n: int) -> NDArray[np.float64]:
+    """Chebyshev/cosine-spaced grid: points cluster near BOTH endpoints (so narrow
+    likelihood modes hugging the positive-definiteness boundaries are not missed)."""
+    t = (1.0 - np.cos(np.pi * np.arange(n) / (n - 1))) / 2.0
+    return lo + (hi - lo) * t
+
+
 def _null_constrained_mle(
-    a: NDArray, b: NDArray, mu0: float, n_grid: int = 400, return_info: bool = False
+    a: NDArray, b: NDArray, mu0: float, n_grid: int = 256, return_info: bool = False
 ):
     """Global MLE of (sigma^2, rho) with the mean fixed at ``mu0``.
 
     The profiled objective ``2J log(qform(rho)) + log|R(rho)|`` is **multimodal**
-    (competing +inf/-inf as rho approaches the two PD boundaries), so a single
-    bounded minimization can land in a non-global basin. We instead evaluate the
-    objective on a dense grid over the PD interval ``(-1/(2(J-1)), 1/2)``, bracket
-    every interior local minimum and both boundaries, refine each candidate, and
-    return the global optimum. Set ``return_info`` for optimizer diagnostics.
+    (competing +inf/-inf as rho approaches the two PD boundaries). We find the global
+    optimum by locating **every** stationary point: bracket all sign changes of the
+    analytic derivative ``f'`` on a boundary-clustered (cosine) grid and refine each
+    with Brent root-finding to near-machine precision, then take the argmin over those
+    stationary points plus explicit evaluations arbitrarily close to both boundaries.
+    A second pass at doubled resolution provides a globality check (``converged``).
+    Set ``return_info`` for optimizer diagnostics; raises on a non-finite objective.
     """
     J = a.size
-    lo, hi = -1.0 / (2.0 * (J - 1)) + 1e-9, 0.5 - 1e-9
+    lo, hi = -1.0 / (2.0 * (J - 1)) + 1e-12, 0.5 - 1e-12
     s0sq, Su2, Sv2 = _profile_stats(a, b, mu0, J)
 
-    grid = np.linspace(lo, hi, n_grid)
-    obj = _neg2ll_grid(grid, s0sq, Su2, Sv2, J)
-
-    def scal(rho: float) -> float:
+    def fobj(rho: float) -> float:
         return float(_neg2ll_grid(rho, s0sq, Su2, Sv2, J))
 
-    cand_rho: list[float] = []
-    cand_obj: list[float] = []
-    # interior local minima: obj[i] <= both neighbours -> refine within the bracket
-    interior = np.where((obj[1:-1] <= obj[:-2]) & (obj[1:-1] <= obj[2:]))[0] + 1
-    for i in interior:
-        r = optimize.minimize_scalar(scal, bounds=(grid[i - 1], grid[i + 1]), method="bounded")
-        cand_rho.append(float(r.x)); cand_obj.append(float(r.fun))
-    # both boundaries (narrow basins can hug the PD edges)
-    for aa, bb in ((grid[0], grid[2]), (grid[-3], grid[-1])):
-        r = optimize.minimize_scalar(scal, bounds=(aa, bb), method="bounded")
-        cand_rho.append(float(r.x)); cand_obj.append(float(r.fun))
-    # raw grid argmin as a safety net
-    gi = int(np.argmin(obj))
-    cand_rho.append(float(grid[gi])); cand_obj.append(float(obj[gi]))
+    def fprime(rho: float) -> float:
+        return float(_profile_derivative(rho, s0sq, Su2, Sv2, J))
 
-    k = int(np.argmin(cand_obj))
-    rho0 = cand_rho[k]
+    def search(n: int) -> tuple[float, float, int]:
+        grid = _cosine_grid(lo, hi, n)
+        d = _profile_derivative(grid, s0sq, Su2, Sv2, J)
+        cand = list(grid)                                     # grid points as a safety net
+        for lohi in (lo, hi):                                # explicit boundary evaluations
+            cand += [lohi + s * eps for s, eps in ((+1 if lohi == lo else -1, e)
+                     for e in (1e-12, 1e-9, 1e-6, 1e-4, 1e-3))]
+        sign = np.sign(d)
+        for i in np.where(sign[:-1] * sign[1:] < 0)[0]:      # every derivative sign change
+            try:
+                cand.append(float(optimize.brentq(fprime, grid[i], grid[i + 1],
+                                                  xtol=1e-13, rtol=8.9e-16)))
+            except (ValueError, RuntimeError):
+                pass
+        cand = [r for r in cand if lo <= r <= hi]
+        objs = np.array([fobj(r) for r in cand])
+        k = int(np.argmin(objs))
+        n_stat = int((sign[:-1] * sign[1:] < 0).sum())
+        return float(cand[k]), float(objs[k]), n_stat
+
+    rho1, obj1, ns1 = search(n_grid)
+    rho2, obj2, ns2 = search(2 * n_grid)
+    (rho0, best_obj) = (rho1, obj1) if obj1 <= obj2 else (rho2, obj2)
+    converged = abs(obj1 - obj2) < 1e-6
+    if not np.isfinite(best_obj):
+        raise ValueError("SHARP profile optimizer: non-finite objective (degenerate input)")
+
     sigma2_0 = _quadratic_form(a, b, mu0, rho0, J) / (2 * J)
     if return_info:
-        info = {"n_local_minima": int(len(interior)), "n_candidates": len(cand_obj),
-                "obj": float(cand_obj[k]), "rho": rho0,
-                "grid_argmin_gap": float(obj[gi] - cand_obj[k])}
+        info = {"n_stationary": max(ns1, ns2), "obj": best_obj, "rho": rho0,
+                "converged": bool(converged), "obj_coarse": obj1, "obj_fine": obj2}
         return sigma2_0, rho0, info
     return sigma2_0, rho0
 
@@ -870,6 +907,9 @@ def sharp_score_test(
     Returns ``D_bar``, the score ``z``, ``p``, and the null-constrained
     ``sigma2``/``rho`` and ``var_Dbar``.
     """
+    if alternative not in ("two-sided", "greater", "less"):
+        raise ValueError(
+            f"alternative must be 'two-sided', 'greater' or 'less', got {alternative!r}")
     mask = ~(np.isnan(D_A) | np.isnan(D_B))
     a, b = np.asarray(D_A, float)[mask], np.asarray(D_B, float)[mask]
     J = a.size
@@ -886,8 +926,11 @@ def sharp_score_test(
         p = float(1 - stats.norm.cdf(z))
     elif alternative == "less":
         p = float(stats.norm.cdf(z))
-    else:
+    elif alternative == "two-sided":
         p = float(2 * (1 - stats.norm.cdf(abs(z))))
+    else:
+        raise ValueError(
+            f"alternative must be 'two-sided', 'greater' or 'less', got {alternative!r}")
     return {"D_bar": float(D_bar), "z": float(z), "p": p, "sigma2": float(sigma2_0),
             "rho": float(rho0), "var_Dbar": float(var_Dbar), "J": int(J)}
 
@@ -1013,7 +1056,7 @@ def sharp_permutation_null(
         )
         res = sharp_eval(v, arms=[arm], J=J, K=K, configs={arm: config},
                          dim=dim, seed=seed, verbose=False)
-        return _sharp_moments(res.D_A[arm], res.D_B[arm])[0]
+        return _legacy_mom_estimate(res.D_A[arm], res.D_B[arm])[0]
 
     obs = observed_stat(views.B)
 

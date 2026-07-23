@@ -56,7 +56,8 @@ def sha256_subjects(sub_ids: Sequence[str]) -> str:
 
 
 #: Provenance record schema version (bump on breaking changes to the fields).
-SCHEMA_VERSION = "2"
+#: v3 splits the single source_commit into analysis_source_commit + provenance_stamp_commit.
+SCHEMA_VERSION = "3"
 
 
 def _lockfile_sha256() -> str | None:
@@ -73,15 +74,20 @@ def provenance(
 ) -> dict[str, Any]:
     """Build a provenance record for an artifact.
 
-    Captures the source commit + dirty flag, the ``training_data.csv`` SHA-256, the
-    subject-set SHA-256 (hash of the sorted ``sub_ids``), the run ``config``, a UTC
-    timestamp, the schema version, and the environment lockfile (``uv.lock``) hash.
-    The artifact's own SHA-256 is added by :func:`write_sidecar` after the file is
-    written.
+    Records two commits: ``analysis_source_commit`` (the code that actually produced
+    the artifact) and ``provenance_stamp_commit`` (the commit at which this record was
+    written/refreshed). At generation time they are identical; a later
+    :mod:`scripts.restamp_provenance` pass refreshes only the stamp commit and
+    preserves the analysis commit. Also captures the ``dirty`` flag, the
+    ``training_data.csv`` + subject-set + ``uv.lock`` SHA-256s, the run ``config``, a
+    UTC timestamp, and the schema version. The artifact's own SHA-256 is added by
+    :func:`write_sidecar`.
     """
+    commit = git_commit()
     return {
         "schema_version": SCHEMA_VERSION,
-        "source_commit": git_commit(),
+        "analysis_source_commit": commit,
+        "provenance_stamp_commit": commit,
         "dirty": git_dirty(),
         "training_csv_sha256": sha256_file(training_csv),
         "subject_set_sha256": sha256_subjects(sub_ids),

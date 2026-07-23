@@ -30,7 +30,7 @@ def _synthetic_views(n=600, shared=3, seed=0):
 # --- SHARP moment estimator -------------------------------------------------
 
 
-def test_sharp_moments_recovers_sigma2_when_independent():
+def test_legacy_mom_estimate_recovers_sigma2_when_independent():
     # Independent entries (rho ~ 0): sigma^2 should be recovered and the variance
     # of the mean should collapse toward sigma^2/(2J).
     rng = np.random.default_rng(0)
@@ -38,17 +38,17 @@ def test_sharp_moments_recovers_sigma2_when_independent():
     sigma = np.sqrt(sigma2)
     D_A = mu + rng.normal(scale=sigma, size=J)
     D_B = mu + rng.normal(scale=sigma, size=J)
-    D_bar, var_Dbar, s2, rho = sharp._sharp_moments(D_A, D_B)
+    D_bar, var_Dbar, s2, rho = sharp._legacy_mom_estimate(D_A, D_B)
     assert abs(s2 - sigma2) < 0.01
     assert rho < 0.1
     assert abs(var_Dbar - sigma2 / (2 * J)) < sigma2 / (2 * J)
 
 
-def test_sharp_moments_variance_formula():
+def test_legacy_mom_estimate_variance_formula():
     # direct check that var_Dbar matches sigma^2 (1/(2J) + (J-1)/J rho)
     D_A = np.array([0.5, 0.4, 0.6, 0.55, 0.45])
     D_B = np.array([0.48, 0.42, 0.58, 0.53, 0.47])
-    D_bar, var_Dbar, s2, rho = sharp._sharp_moments(D_A, D_B)
+    D_bar, var_Dbar, s2, rho = sharp._legacy_mom_estimate(D_A, D_B)
     J = 5
     expected = s2 * (1 / (2 * J) + (J - 1) / J * rho)
     assert abs(var_Dbar - expected) < 1e-9
@@ -93,30 +93,52 @@ _HYPSOM_DB = [0.029928, -0.005542, -0.005518, -0.003796, 0.018563, -0.028853, 0.
               0.008155, -0.001564, 0.009475, -0.005664, 0.013616, -0.019258]
 
 
+def _brute_min_obj(a, b, mu0=0.0, n=200000):
+    """Global minimum of the profiled objective via an ultra-dense boundary-clustered
+    (cosine) grid -- the ground-truth reference for the optimizer."""
+    J = a.size
+    lo, hi = -1.0 / (2.0 * (J - 1)) + 1e-12, 0.5 - 1e-12
+    g = sharp._cosine_grid(lo, hi, n)
+    return float(sharp._neg2ll_grid(g, *sharp._profile_stats(a, b, mu0, J), J).min())
+
+
+def _opt_obj(a, b, mu0=0.0):
+    _, rho = sharp._null_constrained_mle(a, b, mu0)
+    return float(sharp._neg2ll_grid(rho, *sharp._profile_stats(a, b, mu0, J=a.size), a.size))
+
+
 def test_optimizer_regression_hitop_hypsom():
     a, b = np.array(_HYPSOM_DA), np.array(_HYPSOM_DB)
     st = sharp.sharp_score_test(a, b, mu0=0.0, alternative="greater")
     assert abs(st["p"] - 0.839) < 0.005      # global mode, not the local p=0.524
     assert abs(st["rho"] - (-0.0162)) < 0.003
     _, _, info = sharp._null_constrained_mle(a, b, 0.0, return_info=True)
-    assert info["n_local_minima"] >= 2       # genuinely multimodal
+    assert info["n_stationary"] >= 2 and info["converged"]   # genuinely multimodal, global
 
 
-def test_optimizer_matches_bruteforce_randomized():
+def test_optimizer_is_global_randomized():
+    # the optimizer's objective must match a 200k-point boundary-clustered brute force
+    # (the round-2 grid optimizer missed narrow near-boundary modes; this asserts 0 misses).
     rng = np.random.default_rng(0)
-    for _ in range(40):
-        J = int(rng.integers(10, 60))
+    for _ in range(60):
+        J = int(rng.integers(10, 61))
         mu = rng.normal(scale=0.05)
-        rho = float(rng.uniform(0.0, 0.45))
-        A, B = _sample_sharp_null(J, sigma2=float(rng.uniform(0.005, 0.05)), rho=rho, n_sim=1,
-                                  seed=int(rng.integers(1, 1e6)))
+        A, B = _sample_sharp_null(J, sigma2=float(rng.uniform(1e-4, 0.1)),
+                                  rho=float(rng.uniform(0.0, 0.49)), n_sim=1,
+                                  seed=int(rng.integers(1, 10_000_000)))
         a, b = A[0] + mu, B[0] + mu
-        _, rho_hat = sharp._null_constrained_mle(a, b, 0.0)
-        rho_brute = _brute_argmin_rho(a, b, 0.0)
-        assert abs(rho_hat - rho_brute) < 2e-3
+        assert _opt_obj(a, b) <= _brute_min_obj(a, b) + 1e-6
 
 
-def test_score_test_alternatives_consistent():
+def test_optimizer_narrow_mode_near_boundaries():
+    # extreme sufficient statistics push the minimum toward a PD boundary; the optimizer
+    # must still find the global objective.
+    for a, b in ([np.array([5.0] + [0.0] * 29), np.array([-5.0] + [0.0] * 29)],   # huge s0sq
+                 [np.array([0.01] * 30), np.array([-0.01] * 30)]):                 # near-degenerate
+        assert _opt_obj(a, b) <= _brute_min_obj(a, b) + 1e-6
+
+
+def test_score_test_alternatives_consistent_and_validated():
     a, b = _sample_sharp_null(J=30, sigma2=0.04, rho=0.1, n_sim=1, seed=3)
     a, b = a[0] + 0.05, b[0] + 0.05
     g = sharp.sharp_score_test(a, b, alternative="greater")["p"]
@@ -124,6 +146,8 @@ def test_score_test_alternatives_consistent():
     two = sharp.sharp_score_test(a, b, alternative="two-sided")["p"]
     assert abs(g + ls - 1.0) < 1e-9
     assert abs(two - 2 * min(g, ls)) < 1e-9
+    with pytest.raises(ValueError):                 # invalid alternative must not silently pass
+        sharp.sharp_score_test(a, b, alternative="one-sided")
 
 
 def test_score_test_recovers_variance_params():
@@ -154,7 +178,7 @@ def test_score_test_type_i_multi_rho():
     A, B = _sample_sharp_null(30, sigma2, 0.10, n_sim, seed=1)
     mom = 0
     for i in range(n_sim):
-        D_bar, var, _, _ = sharp._sharp_moments(A[i], B[i])
+        D_bar, var, _, _ = sharp._legacy_mom_estimate(A[i], B[i])
         z = D_bar / np.sqrt(var) if var > 1e-12 else 0.0
         mom += 2 * (1 - _norm_cdf(abs(z))) < alpha
     assert mom / n_sim > 0.12          # MoM inflates well above nominal
