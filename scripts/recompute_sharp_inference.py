@@ -3,14 +3,14 @@
 The round-3 SHARP optimizer is boundary-aware and demonstrably global; this recomputes
 the reported inference (CIs, comparisons, p-values) for the CCA ladder and the two
 XGBoost artifacts directly from their stored ``D_A``/``D_B`` (ladder) and ``d_a``/``d_b``
-(XGBoost) half-statistics — no predictive models are refit. Each artifact is preserved as
-``*.r2.*`` before being rewritten with self-consistent provenance (embedded + sidecar,
-both commit fields = current tip). Permutation nulls are optimizer-independent and carried
-over unchanged.
+(XGBoost) half-statistics — no predictive models are refit. Each artifact is preserved by a
+content-addressed, never-clobbering backup (``provenance.backup_artifact`` →
+``<name>.bak-<sha12>.<ext>`` + its sidecar) before being rewritten with self-consistent
+provenance (embedded + sidecar, both commit fields = current tip); rerunning is therefore
+safe and idempotent. Permutation nulls are optimizer-independent and carried over unchanged.
 """
 import json
 import pickle
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,7 +55,7 @@ def recompute_ladder(path: Path) -> None:
     R["comparisons"] = {f"{a1}_vs_{a2}": sharp.sharp_compare(res, a1, a2)
                         for a1, a2 in itertools.combinations(R["arms"], 2)}
     R["provenance"] = _refresh(R.get("provenance", {}), "ladder cis+comparisons")
-    shutil.copy2(path, path.with_suffix(".r2.pkl"))
+    prov.backup_artifact(path)          # content-addressed, never clobbers history
     path.write_bytes(pickle.dumps(R))
     prov.write_sidecar(path, R["provenance"])
     print(f"ladder recomputed: raw r={R['cis']['raw']['mean']:+.3f}, "
@@ -75,7 +75,7 @@ def recompute_xgb(path: Path, alt: str = "greater") -> None:
         rows.append(r)
     out = pl.DataFrame(rows)
     out = out.with_columns(pl.Series("q_fdr", _bh(out["p_one_sided"].to_numpy()))).sort("p_one_sided")
-    shutil.copy2(path, path.with_suffix(".r2.parquet"))
+    prov.backup_artifact(path)          # content-addressed, never clobbers history
     out.write_parquet(path)
     side = path.with_suffix(path.suffix + ".provenance.json")
     rec = json.loads(side.read_text()) if side.exists() else {}

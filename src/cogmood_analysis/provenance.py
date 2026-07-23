@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,6 +99,28 @@ def provenance(
         "env_lockfile_sha256": _lockfile_sha256(),
         "created_at": created_at or datetime.now(timezone.utc).isoformat(),
     }
+
+
+def backup_artifact(path: str | Path) -> Path | None:
+    """Content-addressed, **never-clobbering** backup of an artifact and its sidecar.
+
+    Copies ``<name>.<ext>`` to ``<name>.bak-<sha12>.<ext>`` (and its
+    ``.provenance.json`` sidecar) only if that exact backup does not already exist.
+    Because the backup name embeds the artifact's SHA-256, distinct contents get
+    distinct backups and an existing historical backup is never overwritten — safe to
+    call on every rerun of a regeneration/recompute script. Returns the backup path
+    (or ``None`` if the artifact is absent).
+    """
+    p = Path(path)
+    if not p.exists():
+        return None
+    bak = p.with_suffix(f".bak-{sha256_file(p)[:12]}{p.suffix}")
+    if not bak.exists():                       # immutable: do not clobber history
+        shutil.copy2(p, bak)
+        side = p.with_suffix(p.suffix + ".provenance.json")
+        if side.exists():
+            shutil.copy2(side, bak.with_suffix(bak.suffix + ".provenance.json"))
+    return bak
 
 
 def write_sidecar(artifact_path: str | Path, prov: dict[str, Any]) -> Path:
