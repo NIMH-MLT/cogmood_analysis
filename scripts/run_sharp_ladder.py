@@ -102,7 +102,7 @@ def main() -> None:
         "D_A": res.D_A, "D_B": res.D_B, "cis": cis, "comparisons": comparisons,
         "perms": {}, "perms_done": [], "provenance": provenance,
     }
-    print(f"[provenance] commit={provenance['source_commit'][:9] if provenance['source_commit'] else '?'}"
+    print(f"[provenance] commit={str(provenance['analysis_source_commit'])[:9]}"
           f" dirty={provenance['dirty']} subjset={provenance['subject_set_sha256'][:12]}", flush=True)
 
     def checkpoint():
