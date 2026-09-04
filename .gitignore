@@ -14,4 +14,6 @@ wheels/
 
 data/task
 data/survey
+# participant-level training data + regenerable result artifacts
+data/exploratory
 
